@@ -3,13 +3,19 @@
 Status: **Phase 1 draft** — SSH tunnel launcher only.
 Protocol version: **1**
 
+This contract covers the VMI Analysis client
+(<https://github.com/jakiesumrain/vmi-analysis-client>) and the VMI Analysis
+server (<https://github.com/jakiesumrain/vmi-analysis-gui>). Both repositories
+are checked out side by side in the same parent folder, so every server path
+below is relative to this client repository.
+
 ## Reference server
 
-- Source: `D:\work\vmi-analysis-gui`
-- Shared-server guide:
-  `D:\work\vmi-analysis-gui\docs\shared-server.md`
-- Architecture:
-  `D:\work\vmi-analysis-gui\docs\architecture.md`
+| Repository | Location | URL |
+| --- | --- | --- |
+| Client (this one) | `.` | <https://github.com/jakiesumrain/vmi-analysis-client> |
+| Server | `../vmi-analysis-gui` | <https://github.com/jakiesumrain/vmi-analysis-gui> |
+
 - Server revision used for this draft: `a4ffbf9` on `feature/agent-panel`
   (update this pin when the shared-server changes are merged or the client
   starts consuming a different server revision).

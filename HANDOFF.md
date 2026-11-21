@@ -1,9 +1,14 @@
 # Handoff — VMI Analysis Client
 
 Date: 2026-11-21
-Server checkout: `D:\work\vmi-analysis-gui`
+
+| Repository | Location | URL |
+| --- | --- | --- |
+| Client (this one) | `.` | <https://github.com/jakiesumrain/vmi-analysis-client> |
+| Server | `../vmi-analysis-gui` | <https://github.com/jakiesumrain/vmi-analysis-gui> |
+
 Server revision at handoff: `a4ffbf9` on `feature/agent-panel`
-Shared-server docs: `docs/shared-server.md` in that checkout
+Shared-server docs: `../vmi-analysis-gui/docs/shared-server.md`
 
 ## Why this repo exists
 
@@ -18,8 +23,9 @@ Tauri/Rust client
   -> system browser at the forwarded URL
 ```
 
-It is a separate repository so the Rust/Tauri toolchain, release signing and
-installers do not enter the Python server project.
+It is a separate repository (<https://github.com/jakiesumrain/vmi-analysis-client>)
+so the Rust/Tauri toolchain, release signing and installers do not enter the
+Python server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
 
 ## Current client decisions
 

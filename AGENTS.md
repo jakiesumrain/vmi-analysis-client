@@ -1,21 +1,36 @@
 # VMI Analysis Client
 
-Desktop companion for the VMI Analysis server. This repository is separate
-from the server application so the client can use a Rust/Tauri toolchain, its
-own release cadence, and its own installers without changing the server build.
+Desktop companion for the VMI Analysis server
+(<https://github.com/jakiesumrain/vmi-analysis-gui>). This repository
+(<https://github.com/jakiesumrain/vmi-analysis-client>) is separate from the
+server application so the client can use a Rust/Tauri toolchain, its own
+release cadence, and its own installers without changing the server build.
+
+## Repositories
+
+Both repositories always live side by side in the same parent folder:
+
+| Repository | Location | URL |
+| --- | --- | --- |
+| Client (this one) | `.` | <https://github.com/jakiesumrain/vmi-analysis-client> |
+| Server | `../vmi-analysis-gui` | <https://github.com/jakiesumrain/vmi-analysis-gui> |
+
+All paths in this repository are relative. Never record a drive letter, user
+profile path or other machine-specific absolute path in tracked files.
 
 ## Read first
 
 - [Server contract](docs/server-contract.md) — the client/server boundary.
 - [Handoff](HANDOFF.md) — current architecture, server decisions and next steps.
-- Server source checkout: `D:\work\vmi-analysis-gui`
-- Server shared-server guide:
-  `D:\work\vmi-analysis-gui\docs\shared-server.md`
-- Agent backend reference:
-  `D:\work\vmi-analysis-gui\src\vmi_analysis\agent_backend.py`
+- Server repository: <https://github.com/jakiesumrain/vmi-analysis-gui>,
+  checked out as the sibling directory `../vmi-analysis-gui`.
+- Server shared-server guide: `../vmi-analysis-gui/docs/shared-server.md`.
+- Agent backend reference: `../vmi-analysis-gui/src/vmi_analysis/agent_backend.py`.
 
-When the server repository is not available at that path, use the project URL
-and the pinned server revision in the contract.
+If the sibling checkout is missing, clone
+<https://github.com/jakiesumrain/vmi-analysis-gui> next to this repository and
+check out the server revision pinned in
+[docs/server-contract.md](docs/server-contract.md).
 
 ## Phase 1 scope
 
