@@ -101,11 +101,17 @@ Verified:
   unauthorized API calls rejected with 401, profile saved to disk, and the
   connect failure path reporting through `/api/status`.
 
-Not verified here: the tray icon. Processes started from this automation
-environment run on a desktop that cannot reach Explorer's notification area, so
-`Shell_NotifyIcon` returns access denied and the icon does not appear. The
-window class and window are created successfully. Confirm the icon and its menu
-once on a normal desktop session.
+Not verified here: the tray icon. `--diagnose` reports session 1,
+`WinSta0\Default`, and Explorer's tray window found, yet `Shell_NotifyIcon`
+still returns access denied (error 5) and no icon appears. The window class and
+window are created. The same environment refuses writes to `%APPDATA%` and
+`%TEMP%` for unsigned executables while signed tools can write, which points at
+endpoint security or a restricted terminal rather than the tray code. Confirm
+the icon by launching the executable from Explorer.
+
+Because `%APPDATA%` is not writable here, the client now probes its data
+directories and uses the first writable one (default, beside the executable,
+temp), reporting the choice at startup.
 
 ## Open questions
 
@@ -121,4 +127,5 @@ once on a normal desktop session.
 3. Add Windows signing and installers; test a Linux build.
 4. Update `docs/server-contract.md` before changing any tunnel or protocol
    behavior.
+
 

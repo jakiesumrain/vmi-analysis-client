@@ -76,6 +76,18 @@ Everything lives in the application-config directory, for example
 Set `VMI_CLIENT_CONFIG_DIR` to use another directory (portable installs or
 locked-down profiles).
 
+## Troubleshooting
+
+Run `vmi-analysis-client --diagnose` to print where the client stores its data,
+the Windows session, window station and desktop, and whether Explorer's tray
+window is reachable.
+
+If the default config folder is not writable, the client falls back to a `data`
+folder beside the executable, then to a temp folder. The chosen location is
+reported at startup. A tray icon can only appear when the process runs on the
+interactive desktop; some security products also block unsigned programs from
+adding one.
+
 ## Security model
 
 - The panel and the tunnel both bind `127.0.0.1` only. Nothing listens on a
@@ -131,4 +143,7 @@ implemented:
 - Tray menus on Linux and macOS (Windows only today).
 - Signed installers and automatic updates.
 - Client-side Agent egress (Phase 2, needs a server-side relay).
+
+
+
 

@@ -6,13 +6,14 @@
 //! tunnel. Nothing is rendered with an embedded webview.
 
 mod config;
+mod diag;
 mod secrets;
 mod server;
 mod ssh;
 mod tray;
 mod tunnel;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -325,29 +326,50 @@ struct SessionFile {
     token: String,
 }
 
-fn config_dir() -> PathBuf {
+/// Directories to try for client data, in order.
+pub(crate) fn config_candidates() -> Vec<(&'static str, PathBuf)> {
+    let mut candidates = Vec::new();
     if let Some(dir) = std::env::var_os("VMI_CLIENT_CONFIG_DIR") {
-        return PathBuf::from(dir);
+        candidates.push(("environment", PathBuf::from(dir)));
     }
-    if cfg!(windows) {
-        std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("com.vmi.analysis.client")
-    } else if cfg!(target_os = "macos") {
-        home_dir().join("Library/Application Support/com.vmi.analysis.client")
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir().join(".config"))
-            .join("com.vmi.analysis.client")
+    candidates.push(("default", diag::default_config_dir()));
+    if let Some(dir) = diag::portable_config_dir() {
+        candidates.push(("beside executable", dir));
     }
+    candidates.push(("temp", std::env::temp_dir().join("vmi-analysis-client")));
+    candidates
 }
 
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+/// Whether a directory can be created and written to by this process.
+pub(crate) fn is_writable_dir(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".write-probe-{}", std::process::id()));
+    let ok = std::fs::write(&probe, b"probe").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// Pick the first writable data directory, so a locked-down profile or
+/// security software cannot stop the client from starting.
+fn choose_config_dir() -> PathBuf {
+    let candidates = config_candidates();
+    for (label, dir) in &candidates {
+        if is_writable_dir(dir) {
+            if *label != "default" && *label != "environment" {
+                log_line(
+                    "warn",
+                    format!("using {label} for client data: {}", dir.display()),
+                );
+            }
+            return dir.clone();
+        }
+    }
+    candidates
+        .last()
+        .map(|(_, dir)| dir.clone())
+        .unwrap_or_else(diag::default_config_dir)
 }
 
 fn new_token() -> String {
@@ -395,6 +417,12 @@ async fn running_instance_url(session: &SessionFile) -> Option<String> {
 
 /// Entry point used by the binary.
 pub fn run() {
+    if std::env::args().any(|arg| arg == "--diagnose") {
+        let dir = choose_config_dir();
+        diag::report(&dir);
+        return;
+    }
+
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -403,7 +431,7 @@ pub fn run() {
 }
 
 async fn run_async() {
-    let dir = config_dir();
+    let dir = choose_config_dir();
     if let Err(err) = std::fs::create_dir_all(&dir) {
         eprintln!("[error] could not create {}: {err}", dir.display());
         return;
