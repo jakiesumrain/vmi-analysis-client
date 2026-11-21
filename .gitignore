@@ -1,7 +1,7 @@
 # Rust / Tauri build output
 /target/
-/src-tauri/target/
-/src-tauri/gen/
+/client/target/
+/client/gen/
 
 # Local build caches and scratch space
 .cache/
@@ -27,3 +27,4 @@ secrets.json
 .DS_Store
 Thumbs.db
 *.log
+

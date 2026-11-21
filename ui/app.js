@@ -1,11 +1,11 @@
-/* VMI Analysis Client window logic.
+/* VMI Analysis Client control panel.
  *
- * Talks to the Rust backend through the global Tauri API (withGlobalTauri).
+ * Runs in the system browser and talks to the local client service over
+ * loopback HTTP. The per-run token from the address bar authorizes every
+ * request and the event stream.
  */
 
-const tauri = window.__TAURI__;
-const invoke = tauri && tauri.core ? tauri.core.invoke : null;
-const listen = tauri && tauri.event ? tauri.event.listen : null;
+const token = new URLSearchParams(window.location.search).get("token") || "";
 
 const el = (id) => document.getElementById(id);
 
@@ -34,6 +34,7 @@ const ui = {
   remove: el("delete-button"),
   open: el("open-button"),
   copy: el("copy-button"),
+  quit: el("quit-button"),
   error: el("form-error"),
   pill: el("status-pill"),
   pillLabel: el("status-label"),
@@ -42,16 +43,28 @@ const ui = {
   log: el("log"),
   clearLog: el("clear-log"),
   version: el("version"),
+  service: el("service-note"),
 };
 
 let profiles = [];
 let status = { state: "disconnected", message: "Not connected.", url: null };
 let autoOpenedUrl = null;
 
-function requireBackend() {
-  if (!invoke) {
-    throw new Error("The Tauri backend is not available in this window.");
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  if (!response.ok) {
+    const text = (await response.text()).trim();
+    throw new Error(text || `Request failed (${response.status})`);
   }
+  const type = response.headers.get("content-type") || "";
+  return type.includes("application/json") ? response.json() : null;
 }
 
 function showError(message) {
@@ -64,7 +77,11 @@ function showError(message) {
 }
 
 function setBusy(busy) {
-  ui.connect.disabled = busy || status.state === "connected" || status.state === "connecting" || status.state === "reconnecting";
+  ui.connect.disabled =
+    busy ||
+    status.state === "connected" ||
+    status.state === "connecting" ||
+    status.state === "reconnecting";
   ui.connect.textContent = busy ? "Connecting…" : "Connect";
 }
 
@@ -74,8 +91,7 @@ function logLine(level, message) {
   const label = document.createElement("span");
   const text = document.createElement("span");
 
-  const now = new Date();
-  time.textContent = now.toLocaleTimeString([], { hour12: false });
+  time.textContent = new Date().toLocaleTimeString([], { hour12: false });
   label.textContent = level;
   label.className = `level level-${level}`;
   text.textContent = message;
@@ -97,7 +113,6 @@ function applyStatus(next) {
 
   const connected = state === "connected";
   const busyState = state === "connecting" || state === "reconnecting";
-  const failed = state === "failed";
 
   ui.url.textContent = status.url || "No local address yet";
   ui.url.classList.toggle("active", connected);
@@ -109,9 +124,12 @@ function applyStatus(next) {
 
   if (connected && status.url && ui.autoOpen.checked && autoOpenedUrl !== status.url) {
     autoOpenedUrl = status.url;
-    invoke("open_url", { url: status.url }).catch((err) => logLine("error", String(err)));
+    api("/api/open", {
+      method: "POST",
+      body: JSON.stringify({ url: status.url }),
+    }).catch((err) => logLine("error", err.message));
   }
-  if (failed) {
+  if (state === "failed") {
     showError(status.message);
   }
 }
@@ -122,7 +140,8 @@ function fillForm(profile) {
   ui.port.value = profile.port || 22;
   ui.user.value = profile.user || "";
   ui.authKind.value = profile.auth && profile.auth.kind === "key_file" ? "key_file" : "password";
-  ui.keyPath.value = profile.auth && profile.auth.kind === "key_file" ? profile.auth.path || "" : "";
+  ui.keyPath.value =
+    profile.auth && profile.auth.kind === "key_file" ? profile.auth.path || "" : "";
   ui.remoteHost.value = profile.remote_host || "127.0.0.1";
   ui.remotePort.value = profile.remote_port || 13517;
   ui.localPort.value = profile.local_port ? profile.local_port : "";
@@ -160,7 +179,7 @@ function readForm() {
 }
 
 function refreshProfiles(store) {
-  profiles = store.profiles || [];
+  profiles = (store && store.profiles) || [];
   const selected = ui.profileSelect.value;
   ui.profileSelect.replaceChildren();
   ui.profileSelect.append(new Option("New profile", ""));
@@ -183,70 +202,72 @@ async function submit(event) {
   if (event) {
     event.preventDefault();
   }
-  requireBackend();
   showError("");
   const profile = readForm();
   const keyMode = ui.authKind.value === "key_file";
   setBusy(true);
   try {
-    const info = await invoke("connect", {
-      profile,
-      password: keyMode ? null : ui.password.value,
-      passphrase: keyMode ? ui.passphrase.value : null,
+    const info = await api("/api/connect", {
+      method: "POST",
+      body: JSON.stringify({
+        profile,
+        password: keyMode ? null : ui.password.value,
+        passphrase: keyMode ? ui.passphrase.value : null,
+      }),
     });
     ui.password.value = "";
     ui.passphrase.value = "";
     applyStatus({ state: "connecting", message: "Connecting…", url: info.url });
     logLine("info", `Tunnel requested at ${info.url}`);
   } catch (err) {
-    const message = typeof err === "string" ? err : err && err.message ? err.message : String(err);
-    showError(message);
-    logLine("error", message);
+    showError(err.message);
+    logLine("error", err.message);
   } finally {
     setBusy(false);
   }
 }
 
 async function saveProfile() {
-  requireBackend();
   showError("");
   try {
-    const store = await invoke("save_profile", { profile: readForm() });
+    const profile = readForm();
+    const store = await api("/api/profiles", {
+      method: "POST",
+      body: JSON.stringify(profile),
+    });
     refreshProfiles(store);
-    ui.profileSelect.value = (readForm().name || "").trim() || `${readForm().user}@${readForm().host}`;
+    ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
     ui.remove.disabled = false;
     logLine("info", "Profile saved.");
   } catch (err) {
-    showError(typeof err === "string" ? err : String(err));
+    showError(err.message);
   }
 }
 
 async function deleteProfile() {
-  requireBackend();
   const name = ui.profileSelect.value;
   if (!name) {
     return;
   }
   try {
-    const store = await invoke("delete_profile", { name });
+    const store = await api(`/api/profiles/${encodeURIComponent(name)}`, { method: "DELETE" });
     refreshProfiles(store);
     fillForm({});
     ui.profileSelect.value = "";
     ui.remove.disabled = true;
     logLine("info", `Profile "${name}" deleted.`);
   } catch (err) {
-    showError(typeof err === "string" ? err : String(err));
+    showError(err.message);
   }
 }
 
 async function disconnect() {
-  requireBackend();
   try {
-    const next = await invoke("disconnect");
+    const next = await api("/api/disconnect", { method: "POST", body: "{}" });
     applyStatus(next);
     logLine("info", "Disconnected by user.");
   } catch (err) {
-    showError(typeof err === "string" ? err : String(err));
+    showError(err.message);
   }
 }
 
@@ -255,9 +276,9 @@ async function openTunnel() {
     return;
   }
   try {
-    await invoke("open_url", { url: status.url });
+    await api("/api/open", { method: "POST", body: JSON.stringify({ url: status.url }) });
   } catch (err) {
-    logLine("error", String(err));
+    logLine("error", err.message);
   }
 }
 
@@ -274,42 +295,62 @@ async function copyUrl() {
 }
 
 async function browseKey() {
-  requireBackend();
   try {
-    const path = await invoke("pick_key_file");
+    const path = await api("/api/pick-key", { method: "POST", body: "{}" });
     if (path) {
       ui.keyPath.value = path;
     }
   } catch (err) {
-    logLine("warn", String(err));
+    logLine("warn", err.message);
   }
 }
 
+async function quitClient() {
+  try {
+    await api("/api/quit", { method: "POST", body: "{}" });
+    ui.service.textContent = "The client is stopping. This tab can be closed.";
+    ui.pill.className = "pill pill-disconnected";
+    ui.pillLabel.textContent = "Stopped";
+  } catch (err) {
+    logLine("error", err.message);
+  }
+}
+
+function handleStatusEvent(payload) {
+  applyStatus(payload);
+}
+
+function handleLogEvent(payload) {
+  logLine(payload.level || "info", payload.message || "");
+}
+
 async function init() {
-  if (!invoke) {
-    showError("The Tauri backend is not available in this window.");
+  if (!token) {
+    showError("This panel needs the token from the client. Start the client again to reopen it.");
     return;
   }
 
   try {
-    ui.version.textContent = `v${await invoke("app_version")}`;
-  } catch {
-    /* optional */
-  }
-
-  try {
-    refreshProfiles(await invoke("load_profiles"));
-    applyStatus(await invoke("current_status"));
+    const store = await api("/api/profiles");
+    refreshProfiles(store);
+    const initial =
+      profiles.find((profile) => (profile.name || "") === (store.last_used || "")) || profiles[0];
+    if (initial) {
+      ui.profileSelect.value = initial.name || "";
+      fillForm(initial);
+      ui.remove.disabled = false;
+    }
+    applyStatus(await api("/api/status"));
   } catch (err) {
-    showError(String(err));
+    showError(err.message);
   }
 
-  if (listen) {
-    await listen("client-status", (event) => applyStatus(event.payload));
-    await listen("client-log", (event) => {
-      const payload = event.payload || {};
-      logLine(payload.level || "info", payload.message || "");
-    });
+  // The snapshot flag is used by the screenshot check; skip the live stream so
+  // the page reaches an idle state.
+  if (!new URLSearchParams(window.location.search).has("snapshot")) {
+    const source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    source.addEventListener("status", (event) => handleStatusEvent(JSON.parse(event.data)));
+    source.addEventListener("log", (event) => handleLogEvent(JSON.parse(event.data)));
   }
 
   ui.form.addEventListener("submit", submit);
@@ -319,19 +360,19 @@ async function init() {
   ui.disconnect.addEventListener("click", disconnect);
   ui.open.addEventListener("click", openTunnel);
   ui.copy.addEventListener("click", copyUrl);
+  ui.quit.addEventListener("click", quitClient);
   el("browse-key").addEventListener("click", browseKey);
   ui.clearLog.addEventListener("click", () => ui.log.replaceChildren());
   ui.profileSelect.addEventListener("change", () => {
     const profile = selectedProfile();
     ui.remove.disabled = !profile;
-    if (profile) {
-      fillForm(profile);
-    } else {
-      fillForm({});
-    }
+    fillForm(profile || {});
   });
 
   applyStatus(status);
 }
 
-init().catch((err) => showError(String(err)));
+init().catch((err) => showError(err.message));
+
+
+

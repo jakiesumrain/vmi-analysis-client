@@ -20,7 +20,7 @@
           <span class="dot" aria-hidden="true"></span>
           <span id="status-label">Disconnected</span>
         </span>
-        <span id="version" class="version"></span>
+        <button type="button" id="quit-button" class="button ghost small">Quit client</button>
       </div>
     </header>
 
@@ -134,9 +134,11 @@
             <button type="button" id="copy-button" class="button ghost small" disabled>Copy</button>
           </div>
           <p class="hint">
-            The server listens on loopback only. All traffic goes through SSH;
-            closing this window keeps the tunnel running in the tray.
+            The server listens on loopback only. All traffic goes through SSH.
+            Closing this tab keeps the tunnel running; start the client again to
+            reopen this panel, or choose <strong>Quit client</strong> to stop it.
           </p>
+          <p id="service-note" class="hint subtle">Local service on 127.0.0.1.</p>
         </div>
 
         <div class="log-head">

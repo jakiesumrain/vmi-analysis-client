@@ -87,13 +87,18 @@ The server account should be restricted to the forwarding needed for VMI:
 
 The client must not request a remote shell, a PTY, or remote forwarding.
 
-## Phase 1: no HTTP API
+## Phase 1: no server API
 
-There is no custom client HTTP API in Phase 1. The contract is:
+There is no custom API between the client and the server. The contract is:
 
 ```text
 SSH local forward + existing NiceGUI web application + browser
 ```
+
+The client's own control panel is a loopback-only HTTP service on `127.0.0.1`
+(`/api/*`, authorized by a token generated for each run). It is local process
+plumbing, not part of the client/server contract, and must never be exposed on
+a network interface.
 
 The client must not scrape the GUI, inject credentials into the page, or
 require server-side code changes.

@@ -5,12 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::Handle;
-use tauri::AppHandle;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 use crate::ssh::{self, ClientHandler, ConnectSpec, HostKeyOutcome};
-use crate::{emit_log, publish, AppState, Status};
+use crate::{emit_log, publish, Status};
 
 /// How often the supervisor checks whether the SSH session is still alive.
 const LIVENESS_INTERVAL: Duration = Duration::from_secs(2);
@@ -32,7 +31,7 @@ pub struct Target {
 /// Accept browser connections on the local listener and forward each one
 /// through the current SSH session.
 pub async fn accept_loop(
-    app: AppHandle,
+    state: crate::SharedState,
     cancel: CancellationToken,
     listener: TcpListener,
     session: Session,
@@ -50,13 +49,13 @@ pub async fn accept_loop(
                     });
                 }
                 Err(err) => {
-                    emit_log(&app, "warn", format!("Local listener error: {err}"));
+                    emit_log(&state, "warn", format!("Local listener error: {err}"));
                     tokio::time::sleep(Duration::from_millis(250)).await;
                 }
             }
         }
     }
-    emit_log(&app, "info", "Local listener closed.");
+    emit_log(&state, "info", "Local listener closed.");
 }
 
 async fn forward(mut tcp: TcpStream, peer: SocketAddr, session: Session, target: Arc<Target>) {
@@ -90,8 +89,7 @@ async fn forward(mut tcp: TcpStream, peer: SocketAddr, session: Session, target:
 /// Keep one SSH session alive for the lifetime of the tunnel: connect,
 /// authenticate, detect loss, and reconnect with a bounded number of attempts.
 pub async fn supervise(
-    app: AppHandle,
-    state: Arc<AppState>,
+    state: crate::SharedState,
     cancel: CancellationToken,
     session: Session,
     spec: ConnectSpec,
@@ -107,7 +105,6 @@ pub async fn supervise(
         }
 
         publish(
-            &app,
             &state,
             Status {
                 state: if first_attempt {
@@ -132,18 +129,17 @@ pub async fn supervise(
 
                 if host_key == HostKeyOutcome::Learned {
                     emit_log(
-                        &app,
+                        &state,
                         "info",
                         "New server host key recorded; future connections verify it.",
                     );
                 }
                 emit_log(
-                    &app,
+                    &state,
                     "info",
                     format!("Tunnel up: {url} -> {}:{}", spec.host, spec.port),
                 );
                 publish(
-                    &app,
                     &state,
                     Status {
                         state: "connected".into(),
@@ -161,7 +157,10 @@ pub async fn supervise(
                     }
                     let closed = {
                         let guard = session.lock().await;
-                        guard.as_ref().map(|h| h.is_closed()).unwrap_or(true)
+                        guard
+                            .as_ref()
+                            .map(|handle| handle.is_closed())
+                            .unwrap_or(true)
                     };
                     if closed {
                         break;
@@ -174,9 +173,8 @@ pub async fn supervise(
 
                 *session.lock().await = None;
                 attempt = 0;
-                emit_log(&app, "warn", "The SSH session closed. Reconnecting…");
+                emit_log(&state, "warn", "The SSH session closed. Reconnecting…");
                 publish(
-                    &app,
                     &state,
                     Status {
                         state: "reconnecting".into(),
@@ -195,9 +193,8 @@ pub async fn supervise(
                 first_attempt = false;
 
                 if !err.retryable() {
-                    emit_log(&app, "error", err.message.clone());
+                    emit_log(&state, "error", err.message.clone());
                     publish(
-                        &app,
                         &state,
                         Status {
                             state: "failed".into(),
@@ -213,9 +210,8 @@ pub async fn supervise(
                 attempt += 1;
                 if attempt >= MAX_ATTEMPTS {
                     let message = format!("{} Gave up after {MAX_ATTEMPTS} attempts.", err.message);
-                    emit_log(&app, "error", message.clone());
+                    emit_log(&state, "error", message.clone());
                     publish(
-                        &app,
                         &state,
                         Status {
                             state: "failed".into(),
@@ -233,9 +229,8 @@ pub async fn supervise(
                     err.message,
                     RECONNECT_DELAY.as_secs()
                 );
-                emit_log(&app, "warn", message.clone());
+                emit_log(&state, "warn", message.clone());
                 publish(
-                    &app,
                     &state,
                     Status {
                         state: "reconnecting".into(),
@@ -253,7 +248,7 @@ pub async fn supervise(
 }
 
 /// Drop the active connection slot if it still belongs to this supervisor.
-fn abandon(state: &AppState, session: &Session) {
+fn abandon(state: &crate::AppState, session: &Session) {
     if let Ok(mut guard) = state.connection.lock() {
         let ours = guard
             .as_ref()
