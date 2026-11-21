@@ -1,0 +1,26 @@
+# Rust / Tauri build output
+/target/
+/src-tauri/target/
+/src-tauri/gen/
+
+# Frontend tooling
+node_modules/
+dist/
+.vite/
+
+# Local environment and secrets - never commit these
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
+secrets.json
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
