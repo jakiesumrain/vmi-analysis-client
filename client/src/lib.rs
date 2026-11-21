@@ -9,6 +9,7 @@ mod config;
 mod secrets;
 mod server;
 mod ssh;
+mod tray;
 mod tunnel;
 
 use std::path::PathBuf;
@@ -134,12 +135,19 @@ pub fn emit_log(state: &AppState, level: &str, message: impl Into<String>) {
     });
 }
 
-/// Store the status and push it to the browser panel.
+/// Store the status, push it to the browser panel and update the tray tooltip.
 pub fn publish(state: &AppState, status: Status) {
     if let Ok(mut guard) = state.status.lock() {
         *guard = status.clone();
     }
-    let _ = state.events.send(UiEvent::Status { status });
+    let _ = state.events.send(UiEvent::Status {
+        status: status.clone(),
+    });
+    let tooltip = match status.local_port {
+        Some(port) => format!("VMI Analysis Client — {} · port {port}", status.state),
+        None => format!("VMI Analysis Client — {}", status.state),
+    };
+    tray::set_tooltip(&tooltip);
 }
 
 pub fn read_status(state: &AppState) -> Status {
@@ -447,6 +455,34 @@ async fn run_async() {
     log_line("info", format!("Panel: {url}"));
     if let Err(err) = open::that(&url) {
         eprintln!("[warn] could not open the browser automatically: {err}");
+    }
+
+    let (tray_tx, mut tray_rx) = tokio::sync::mpsc::unbounded_channel();
+    tray::start(dir.clone(), tray_tx);
+    {
+        let state = Arc::clone(&state);
+        let panel = url.clone();
+        tokio::spawn(async move {
+            while let Some(action) = tray_rx.recv().await {
+                match action {
+                    tray::TrayAction::OpenPanel => {
+                        if let Err(err) = open::that(&panel) {
+                            emit_log(&state, "warn", format!("Could not open the panel: {err}"));
+                        }
+                    }
+                    tray::TrayAction::Reconnect => {
+                        if let Err(err) = reconnect(Arc::clone(&state)).await {
+                            emit_log(&state, "error", err);
+                        }
+                    }
+                    tray::TrayAction::Disconnect => stop(&state),
+                    tray::TrayAction::Quit => {
+                        stop(&state);
+                        std::process::exit(0);
+                    }
+                }
+            }
+        });
     }
 
     let app = server::router(Arc::clone(&state));

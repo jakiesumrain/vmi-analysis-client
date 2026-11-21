@@ -23,6 +23,8 @@ vmi-analysis-client  (local process)
 - Saved profiles, served by the panel and read back on the next launch.
 - A second launch detects the running instance and reopens the panel instead of
   starting a second tunnel.
+- A native tray icon: open the panel, reconnect, disconnect, quit; its tooltip
+  shows the tunnel state. Double-click opens the panel.
 - **Quit client** stops the tunnel and the process; closing the tab does not.
 
 ## Requirements
@@ -95,8 +97,10 @@ client/
   src/server.rs     loopback HTTP panel, JSON API, event stream
   src/ssh.rs        SSH connection, auth, host-key policy
   src/tunnel.rs     listener, forwarding, reconnect supervisor
+  src/tray.rs       native notification-area icon and menu
   src/secrets.rs    OS-keychain storage
   src/config.rs     profiles and their store
+  assets/vmi.ico    tray icon
   tests/testdata/   throwaway SSH host keys for the tests
 ui/                 panel served by the client (HTML, CSS, JS; no bundler)
 docs/               client/server contract
@@ -120,9 +124,11 @@ Git workflow rules are in [AGENTS.md](AGENTS.md).
 
 ## Status
 
-Phase 1: SSH tunnel plus loopback control panel. Not yet implemented:
+Phase 1: SSH tunnel, loopback control panel and a native tray icon. Not yet
+implemented:
 
 - SSH agent authentication (key file and password only).
-- A tray icon; today the panel is reopened by starting the client again.
+- Tray menus on Linux and macOS (Windows only today).
 - Signed installers and automatic updates.
 - Client-side Agent egress (Phase 2, needs a server-side relay).
+

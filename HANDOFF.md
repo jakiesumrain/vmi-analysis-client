@@ -60,7 +60,8 @@ the tunnel.
 - **Reconnect:** bounded automatic retries; manual connect from the panel.
 - **Single instance:** `session.json` records port and token; launching the
   client again reopens the panel instead of starting a second tunnel.
-- **Tray:** not implemented yet; reopening the panel means starting the client.
+- **Tray:** a native Windows notify icon (no WebView2) with open panel,
+  reconnect, disconnect and quit; the tooltip follows the tunnel state.
 
 ## Current server decisions that constrain the client
 
@@ -85,6 +86,8 @@ Implemented:
   keepalive and bounded reconnect.
 - Keychain storage for passwords and key passphrases.
 - Profiles, single-instance reopen, panel **Quit client**.
+- Native Windows tray icon with open/reconnect/disconnect/quit and a state
+  tooltip; the icon is embedded in the binary (`client/assets/vmi.ico`).
 
 Verified:
 
@@ -98,17 +101,24 @@ Verified:
   unauthorized API calls rejected with 401, profile saved to disk, and the
   connect failure path reporting through `/api/status`.
 
+Not verified here: the tray icon. Processes started from this automation
+environment run on a desktop that cannot reach Explorer's notification area, so
+`Shell_NotifyIcon` returns access denied and the icon does not appear. The
+window class and window are created successfully. Confirm the icon and its menu
+once on a normal desktop session.
+
 ## Open questions
 
-1. Tray icon: add one (native, not WebView2) or keep "start the client again"?
-2. SSH agent authentication in the first release?
-3. Windows signing and installer format; Linux packaging.
-4. Whether the panel should use HTTPS on loopback or keep HTTP plus token.
+1. SSH agent authentication in the first release?
+2. Windows signing and installer format; Linux packaging.
+3. Whether the panel should use HTTPS on loopback or keep HTTP plus token.
+4. Tray menus on Linux and macOS.
 
 ## Next steps
 
-1. Run a real tunnel against a shared-server checkout.
-2. Add a native tray icon and SSH agent authentication.
+1. Run a real tunnel against a shared-server checkout and confirm the tray icon.
+2. Add SSH agent authentication.
 3. Add Windows signing and installers; test a Linux build.
 4. Update `docs/server-contract.md` before changing any tunnel or protocol
    behavior.
+

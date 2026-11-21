@@ -42,7 +42,7 @@ The client will:
 3. Serve a control panel on `127.0.0.1` and open it, and the forwarded VMI page,
    in the system browser.
 4. Keep the tunnel alive, reconnect after sleep/network changes, and expose
-   connect, disconnect, reconnect and quit through the panel.
+   connect, disconnect, reconnect and quit through the panel and the tray icon.
 5. Store credentials in the OS keychain and verify SSH host keys.
 
 The client is a local service plus a browser panel. Do not embed a webview:
@@ -74,6 +74,8 @@ client/
   src/secrets.rs    # OS-keychain password/passphrase storage
   src/ssh.rs        # SSH connection, auth, host-key policy
   src/tunnel.rs     # local listener, forwarding, reconnect supervisor
+  src/tray.rs       # native notification-area icon and menu
+  assets/vmi.ico    # tray icon
   tests/testdata/   # throwaway SSH host keys for the tests
 ui/                 # static panel UI (HTML, CSS, JS; no bundler)
 docs/               # contract and compatibility notes
