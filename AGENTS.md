@@ -60,15 +60,18 @@ limited to the system browser; do not embed the NiceGUI app in a webview yet.
   server-side relay design. Keep it out of the Phase 1 app.
 - Never commit API keys, SSH private keys, passwords or tunnel credentials.
 
-## Planned layout
+## Layout
 
 ```text
-src-tauri/          # Rust/Tauri application
-  src/ssh.rs        # SSH connection and host-key policy
-  src/tunnel.rs     # local port forwarding and keepalive
-  src/secrets.rs    # keychain / SSH agent integration
-  src/tray.rs       # connection status and actions
-ui/                 # optional small connection window
+src-tauri/
+  src/lib.rs        # app shell, commands, tray, window
+  src/config.rs     # profiles and their store
+  src/secrets.rs    # OS-keychain password/passphrase storage
+  src/ssh.rs        # SSH connection, auth, host-key policy
+  src/tunnel.rs     # local listener, forwarding, reconnect supervisor
+  icons/            # generated application icons
+  tests/testdata/   # throwaway SSH host keys for the tests
+ui/                 # static window UI (HTML, CSS, JS; no bundler)
 docs/               # contract and compatibility notes
 ```
 

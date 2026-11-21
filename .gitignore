@@ -3,7 +3,10 @@
 /src-tauri/target/
 /src-tauri/gen/
 
-# Frontend tooling
+# Local build caches and scratch space
+.cache/
+
+# Frontend tooling (no bundler yet; reserved for later)
 node_modules/
 dist/
 .vite/

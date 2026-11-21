@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VMI Analysis Client</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">V</div>
+        <div>
+          <h1>VMI Analysis Client</h1>
+          <p class="subtitle">SSH tunnel to your VMI server</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span id="status-pill" class="pill pill-disconnected">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="status-label">Disconnected</span>
+        </span>
+        <span id="version" class="version"></span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card form-card" aria-labelledby="connection-heading">
+        <div class="card-head">
+          <h2 id="connection-heading">Connection</h2>
+          <div class="profile-row">
+            <select id="profile-select" aria-label="Saved profiles">
+              <option value="">New profile</option>
+            </select>
+          </div>
+        </div>
+
+        <form id="connection-form" autocomplete="off">
+          <div class="grid">
+            <label class="field span-2">
+              <span>Profile name</span>
+              <input id="name" type="text" placeholder="Lab server" />
+            </label>
+
+            <label class="field">
+              <span>Server host</span>
+              <input id="host" type="text" placeholder="vmi.example.org" required />
+            </label>
+
+            <label class="field">
+              <span>SSH port</span>
+              <input id="port" type="number" min="1" max="65535" value="22" />
+            </label>
+
+            <label class="field span-2">
+              <span>SSH user</span>
+              <input id="user" type="text" placeholder="alice" required />
+            </label>
+
+            <label class="field span-2">
+              <span>Authentication</span>
+              <select id="auth-kind">
+                <option value="password">Password</option>
+                <option value="key_file">Key file</option>
+              </select>
+            </label>
+
+            <label class="field span-2" id="password-field">
+              <span>SSH password</span>
+              <input id="password" type="password" autocomplete="current-password" />
+            </label>
+
+            <div class="field span-2" id="key-field" hidden>
+              <span>Key file</span>
+              <div class="inline">
+                <input id="key-path" type="text" placeholder="C:\Users\you\.ssh\id_ed25519" />
+                <button type="button" id="browse-key" class="button ghost">Browse…</button>
+              </div>
+            </div>
+
+            <label class="field span-2" id="passphrase-field" hidden>
+              <span>Key passphrase <em>(optional)</em></span>
+              <input id="passphrase" type="password" autocomplete="off" />
+            </label>
+
+            <label class="check span-2">
+              <input id="remember" type="checkbox" />
+              <span>Remember the password or passphrase in the OS keychain</span>
+            </label>
+          </div>
+
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <div class="grid">
+              <label class="field">
+                <span>Server target address</span>
+                <input id="remote-host" type="text" value="127.0.0.1" />
+              </label>
+              <label class="field">
+                <span>Server web port</span>
+                <input id="remote-port" type="number" min="1" max="65535" value="13517" />
+              </label>
+              <label class="field span-2">
+                <span>Local port <em>(blank = automatic)</em></span>
+                <input id="local-port" type="number" min="0" max="65535" placeholder="automatic" />
+              </label>
+              <label class="check span-2">
+                <input id="auto-open" type="checkbox" checked />
+                <span>Open the browser when the tunnel connects</span>
+              </label>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button type="submit" id="connect-button" class="button primary">Connect</button>
+            <button type="button" id="disconnect-button" class="button" disabled>Disconnect</button>
+            <button type="button" id="save-button" class="button ghost">Save profile</button>
+            <button type="button" id="delete-button" class="button danger-ghost" disabled>Delete</button>
+          </div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section class="card status-card" aria-labelledby="status-heading">
+        <div class="card-head">
+          <h2 id="status-heading">Tunnel</h2>
+        </div>
+
+        <div class="state-block">
+          <p id="state-message" class="state-message">Not connected.</p>
+          <div class="url-row">
+            <code id="local-url">No local address yet</code>
+            <button type="button" id="open-button" class="button primary small" disabled>Open</button>
+            <button type="button" id="copy-button" class="button ghost small" disabled>Copy</button>
+          </div>
+          <p class="hint">
+            The server listens on loopback only. All traffic goes through SSH;
+            closing this window keeps the tunnel running in the tray.
+          </p>
+        </div>
+
+        <div class="log-head">
+          <h3>Activity</h3>
+          <button type="button" id="clear-log" class="button ghost small">Clear</button>
+        </div>
+        <ol id="log" class="log" aria-live="polite"></ol>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

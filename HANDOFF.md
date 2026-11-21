@@ -63,11 +63,37 @@ Python server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
 5. If Phase 2 egress is required, define the relay protocol before writing
    client code.
 
+## Implementation status (Phase 1)
+
+Implemented:
+
+- Rust/Tauri 2 app with a window, tray menu and saved profiles.
+- `russh` SSH connection with password and key-file authentication.
+- Host keys recorded on first contact and refused when they change.
+- Local loopback listener with automatic port choice, direct-tcpip
+  forwarding, keepalive and bounded reconnect.
+- Keychain storage for passwords and key passphrases.
+- Static window UI with connection form, status, activity log and browser
+  launch.
+
+Verified in this checkout:
+
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`.
+- `cargo test`: 15 tests, including an end-to-end test that starts an
+  in-process SSH server, connects with the real client code, forwards bytes to
+  an echo server, and checks host-key trust, changed-key refusal and bad
+  credentials.
+
+Not verified here: the window could not be created in this automation
+environment because WebView2 environment creation fails there (`E_UNEXPECTED`)
+even for a bare Tauri app. Run the app once on a normal desktop session to
+confirm the window and tray.
+
 ## Next steps
 
-1. Scaffold the Tauri 2 app and tray shell.
-2. Implement SSH auth, host-key verification and local forwarding.
-3. Add reconnect/keepalive and local-port conflict handling.
-4. Test against a local shared-server checkout using the manual command in
-   `docs/server-contract.md`.
-5. Add Windows and Linux installers after the tunnel MVP works.
+1. Run the app on a desktop session and connect to a real shared-server
+   checkout.
+2. Add SSH agent authentication.
+3. Add Windows signing and installers, then a Linux build.
+4. Update `docs/server-contract.md` before changing any tunnel or protocol
+   behavior.
