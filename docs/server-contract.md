@@ -45,10 +45,13 @@ The client must:
 
 - choose a free loopback port, or honour an explicitly configured one;
 - fail clearly if the remote forward cannot be established;
+- confirm that SSH can open a channel to the server's web endpoint before
+  reporting a connected tunnel, including after reconnect;
 - verify the SSH host key;
 - keep the tunnel alive with SSH keepalives;
 - reconnect after network loss or machine sleep;
 - close only its own forward and local listener on disconnect.
+  Manual reconnect waits for that listener to close before binding its port again.
 
 Equivalent manual command for reference:
 
@@ -75,7 +78,9 @@ The client should support:
 - SSH agent and key-file authentication first;
 - password fallback through the OS keychain, not plaintext storage;
 - SSH host-key verification against a known-hosts store;
-- explicit handling of a changed host key: warn and refuse automatically.
+- explicit handling of changed keys and unreadable trust records: refuse the
+  connection before authentication, including a different key algorithm for
+  a previously recorded host.
 
 ## Required SSH server policy
 

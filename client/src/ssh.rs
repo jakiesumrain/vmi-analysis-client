@@ -1,11 +1,13 @@
 //! SSH connection, authentication and host-key trust.
 
 use std::fmt;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use russh::client::{self, Config, Handle};
+use russh::keys::ssh_key::known_hosts::KnownHosts;
 use russh::keys::{self, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 
 /// How long to wait for the TCP + key-exchange handshake.
@@ -25,6 +27,8 @@ pub enum SshErrorKind {
     Authentication,
     /// The key file is missing, unreadable or encrypted with a wrong passphrase.
     KeyFile,
+    /// SSH authenticated, but could not open the configured forwarding channel.
+    Forwarding,
     /// The connection failed or dropped; retrying may help.
     Network,
 }
@@ -41,6 +45,10 @@ impl SshError {
             kind,
             message: message.into(),
         }
+    }
+
+    pub fn forwarding(message: impl Into<String>) -> Self {
+        Self::new(SshErrorKind::Forwarding, message)
     }
 
     /// Whether reconnecting could reasonably succeed.
@@ -109,6 +117,38 @@ pub struct ClientHandler {
     observed: Arc<Mutex<Option<keys::PublicKey>>>,
 }
 
+fn check_host_key(host: &str, port: u16, path: &Path, key: &keys::PublicKey) -> HostKeyOutcome {
+    // russh's reader treats any file-open failure as an empty host store.
+    let records = match std::fs::read_to_string(path) {
+        Ok(records) => records,
+        Err(err) if err.kind() == ErrorKind::NotFound => return HostKeyOutcome::Learned,
+        Err(err) => return HostKeyOutcome::Unreadable(err.to_string()),
+    };
+    for entry in KnownHosts::new(&records) {
+        match entry {
+            Ok(entry) if entry.marker().is_none() => (),
+            Ok(_) => {
+                return HostKeyOutcome::Unreadable(
+                    "Unsupported marker in the client host-key store.".into(),
+                )
+            }
+            Err(err) => return HostKeyOutcome::Unreadable(err.to_string()),
+        }
+    }
+    match keys::known_hosts::known_host_keys_path(host, port, path) {
+        Ok(keys) if keys.is_empty() => HostKeyOutcome::Learned,
+        Ok(keys)
+            if keys
+                .iter()
+                .any(|(_, recorded)| recorded.key_data() == key.key_data()) =>
+        {
+            HostKeyOutcome::Trusted
+        }
+        Ok(_) => HostKeyOutcome::Changed,
+        Err(err) => HostKeyOutcome::Unreadable(err.to_string()),
+    }
+}
+
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
@@ -125,23 +165,13 @@ impl client::Handler for ClientHandler {
             *observed = Some(key.clone());
         }
 
-        let outcome = match keys::known_hosts::check_known_hosts_path(
-            &self.host,
-            self.port,
-            &key,
-            &self.known_hosts,
-        ) {
-            Ok(true) => HostKeyOutcome::Trusted,
-            // First contact: accept once, then record after authentication.
-            Ok(false) => HostKeyOutcome::Learned,
-            Err(keys::Error::KeyChanged { .. }) => HostKeyOutcome::Changed,
-            Err(err) => HostKeyOutcome::Unreadable(err.to_string()),
-        };
-        let accepted = !matches!(outcome, HostKeyOutcome::Changed);
+        let outcome = check_host_key(&self.host, self.port, &self.known_hosts, &key);
+        let accepted = matches!(outcome, HostKeyOutcome::Trusted | HostKeyOutcome::Learned);
 
-        if let Ok(mut slot) = self.outcome.lock() {
-            *slot = Some(outcome);
-        }
+        let Ok(mut slot) = self.outcome.lock() else {
+            return Ok(false);
+        };
+        *slot = Some(outcome);
         Ok(accepted)
     }
 }
@@ -222,22 +252,37 @@ pub async fn connect(
 
     authenticate(&mut handle, spec).await?;
 
-    let seen = outcome.lock().ok().and_then(|slot| slot.clone());
-    if matches!(seen, Some(HostKeyOutcome::Learned)) {
-        if let Some(key) = observed.lock().ok().and_then(|slot| slot.clone()) {
-            if let Err(err) =
-                keys::known_hosts::learn_known_hosts_path(&spec.host, spec.port, &key, known_hosts)
-            {
-                // The session is usable; recording is best effort but worth reporting.
-                crate::log_line(
-                    "warn",
-                    format!("Connected, but the host key could not be saved: {err}"),
-                );
-            }
-        }
+    let seen = outcome
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .ok_or_else(|| {
+            SshError::new(
+                SshErrorKind::HostKeyRejected,
+                "Could not verify the server host key.",
+            )
+        })?;
+    if seen == HostKeyOutcome::Learned {
+        let key = observed
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .ok_or_else(|| {
+                SshError::new(
+                    SshErrorKind::HostKeyRejected,
+                    "The server host key was not recorded.",
+                )
+            })?;
+        keys::known_hosts::learn_known_hosts_path(&spec.host, spec.port, &key, known_hosts)
+            .map_err(|err| {
+                SshError::new(
+                    SshErrorKind::HostKeyRejected,
+                    format!("Could not save the server host key: {err}"),
+                )
+            })?;
     }
 
-    Ok((handle, seen.unwrap_or(HostKeyOutcome::Trusted)))
+    Ok((handle, seen))
 }
 
 async fn authenticate(

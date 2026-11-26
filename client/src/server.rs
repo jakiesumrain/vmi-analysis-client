@@ -200,7 +200,7 @@ async fn reconnect_handler(
 }
 
 async fn disconnect(State(state): State<SharedState>) -> Json<Status> {
-    stop(&state);
+    stop(&state).await;
     Json(read_status(&state))
 }
 
@@ -227,7 +227,7 @@ async fn open_url(Json(request): Json<OpenRequest>) -> Result<Json<()>, ApiError
 }
 
 async fn quit(State(state): State<SharedState>) -> Json<()> {
-    stop(&state);
+    stop(&state).await;
     emit_log(&state, "info", "Stopping the client.");
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(250)).await;

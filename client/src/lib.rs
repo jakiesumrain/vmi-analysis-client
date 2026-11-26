@@ -70,11 +70,8 @@ pub enum UiEvent {
 
 /// One live tunnel attempt.
 pub struct ActiveConnection {
-    pub cancel: CancellationToken,
-    pub session: Session,
-    pub profile: Profile,
-    pub url: String,
-    pub local_port: u16,
+    cancel: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
 }
 
 /// Credentials of the most recent session, kept in memory so Reconnect works
@@ -89,7 +86,7 @@ pub struct LastSession {
 pub struct AppState {
     pub store: Mutex<ProfileStore>,
     pub status: Mutex<Status>,
-    pub connection: Mutex<Option<ActiveConnection>>,
+    connection: tokio::sync::Mutex<Option<ActiveConnection>>,
     pub last: Mutex<Option<LastSession>>,
     pub profiles_path: PathBuf,
     pub known_hosts_path: PathBuf,
@@ -111,7 +108,7 @@ impl AppState {
         Self {
             store: Mutex::new(store),
             status: Mutex::new(Status::default()),
-            connection: Mutex::new(None),
+            connection: tokio::sync::Mutex::new(None),
             last: Mutex::new(None),
             profiles_path,
             known_hosts_path: config_dir.join("known_hosts"),
@@ -168,14 +165,16 @@ pub fn store_snapshot(state: &AppState) -> ProfileStore {
 }
 
 /// Cancel the tunnel and report a disconnected state.
-pub fn stop(state: &AppState) {
-    let active = state
-        .connection
-        .lock()
-        .ok()
-        .and_then(|mut guard| guard.take());
-    if let Some(active) = active {
+pub async fn stop(state: &AppState) {
+    let mut connection = state.connection.lock().await;
+    stop_session(state, &mut connection).await;
+}
+
+async fn stop_session(state: &AppState, connection: &mut Option<ActiveConnection>) {
+    if let Some(active) = connection.as_mut() {
         active.cancel.cancel();
+        let _ = (&mut active.task).await;
+        *connection = None;
         emit_log(state, "info", "Tunnel closed.");
     }
     publish(state, Status::default());
@@ -231,7 +230,17 @@ pub async fn start_session(
     profile: Profile,
     auth: AuthMaterial,
 ) -> Result<ConnectInfo, String> {
-    stop(&state);
+    let mut connection = state.connection.lock().await;
+    replace_session(&state, &mut connection, profile, auth).await
+}
+
+async fn replace_session(
+    state: &SharedState,
+    connection: &mut Option<ActiveConnection>,
+    profile: Profile,
+    auth: AuthMaterial,
+) -> Result<ConnectInfo, String> {
+    stop_session(state, connection).await;
 
     let requested_port = profile.local_port;
     let listener = TcpListener::bind(("127.0.0.1", requested_port))
@@ -252,19 +261,6 @@ pub async fn start_session(
     let cancel = CancellationToken::new();
     let session: Session = Arc::new(tokio::sync::Mutex::new(None));
 
-    {
-        let mut guard = state
-            .connection
-            .lock()
-            .map_err(|_| "Internal state lock failed.".to_owned())?;
-        *guard = Some(ActiveConnection {
-            cancel: cancel.clone(),
-            session: Arc::clone(&session),
-            profile: profile.clone(),
-            url: url.clone(),
-            local_port,
-        });
-    }
     if let Ok(mut guard) = state.last.lock() {
         *guard = Some(LastSession {
             profile: profile.clone(),
@@ -284,26 +280,28 @@ pub async fn start_session(
         remote_port: profile.remote_port,
     });
 
-    tokio::spawn(tunnel::accept_loop(
-        Arc::clone(&state),
-        cancel.clone(),
-        listener,
-        Arc::clone(&session),
-        target,
-    ));
-    tokio::spawn(tunnel::supervise(
-        Arc::clone(&state),
-        cancel,
-        session,
-        spec,
-        url.clone(),
-        local_port,
-    ));
+    let state = Arc::clone(state);
+    let task_cancel = cancel.clone();
+    let task_url = url.clone();
+    let task = tokio::spawn(async move {
+        let accept = tunnel::accept_loop(&state, &task_cancel, listener, &session, &target);
+        let supervise = async {
+            tokio::select! {
+                biased;
+                _ = task_cancel.cancelled() => (),
+                _ = tunnel::supervise(&state, &session, &target, spec, task_url, local_port) => (),
+            }
+            task_cancel.cancel();
+        };
+        tokio::join!(accept, supervise);
+    });
+    *connection = Some(ActiveConnection { cancel, task });
 
     Ok(ConnectInfo { url, local_port })
 }
 
 pub async fn reconnect(state: SharedState) -> Result<ConnectInfo, String> {
+    let mut connection = state.connection.lock().await;
     let last = state
         .last
         .lock()
@@ -312,7 +310,7 @@ pub async fn reconnect(state: SharedState) -> Result<ConnectInfo, String> {
         .ok_or_else(|| "Connect once before using Reconnect.".to_owned())?;
     let mut profile = last.profile;
     profile.local_port = last.local_port;
-    start_session(state, profile, last.auth).await
+    replace_session(&state, &mut connection, profile, last.auth).await
 }
 
 // ---------------------------------------------------------------------------
@@ -503,9 +501,9 @@ async fn run_async() {
                             emit_log(&state, "error", err);
                         }
                     }
-                    tray::TrayAction::Disconnect => stop(&state),
+                    tray::TrayAction::Disconnect => stop(&state).await,
                     tray::TrayAction::Quit => {
-                        stop(&state);
+                        stop(&state).await;
                         std::process::exit(0);
                     }
                 }

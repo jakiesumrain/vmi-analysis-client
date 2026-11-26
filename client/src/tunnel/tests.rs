@@ -12,28 +12,41 @@ use russh::keys::PrivateKey;
 use russh::server::{
     Auth, ChannelOpenHandle, Config as ServerConfig, Msg, Server, Session as ServerSession,
 };
-use russh::Channel;
+use russh::{Channel, ChannelOpenFailure};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::*;
+use crate::config::{AuthMethod, Profile};
 use crate::ssh::{self, AuthMaterial, ConnectSpec, HostKeyOutcome, SshErrorKind};
+use crate::{read_status, reconnect, start_session, stop, AppState, Status};
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 const HOST_KEY: &str = include_str!("../../tests/testdata/host_key");
 const OTHER_PUBLIC_KEY: &str = include_str!("../../tests/testdata/host_key2.pub");
+const ECDSA_PUBLIC_KEY: &str = concat!(
+    "ecdsa-sha2-nistp256 ",
+    "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBNzxiwG5/XH+93jo6WB/",
+    "Mn7irbn1lGz4ejfWf7dDihLeircEsyVafocgFVMhqP9Gn9yuiYh9MHDn+U+3LHi36Yk="
+);
 
-struct TestServer;
+struct TestServer {
+    allow_forwarding: bool,
+}
 
 impl Server for TestServer {
     type Handler = TestHandler;
 
     fn new_client(&mut self, _peer: Option<SocketAddr>) -> TestHandler {
-        TestHandler
+        TestHandler {
+            allow_forwarding: self.allow_forwarding,
+        }
     }
 }
 
-struct TestHandler;
+struct TestHandler {
+    allow_forwarding: bool,
+}
 
 impl russh::server::Handler for TestHandler {
     type Error = russh::Error;
@@ -56,13 +69,19 @@ impl russh::server::Handler for TestHandler {
         reply: ChannelOpenHandle,
         _session: &mut ServerSession,
     ) -> Result<(), Self::Error> {
+        if !self.allow_forwarding {
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+        let Ok(mut target) = TcpStream::connect((host_to_connect, port_to_connect as u16)).await
+        else {
+            reply.reject(ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
+        };
         reply.accept().await;
-        let host = host_to_connect.to_owned();
         tokio::spawn(async move {
-            let Ok(mut target) = TcpStream::connect((host.as_str(), port_to_connect as u16)).await
-            else {
-                return;
-            };
             let mut stream = channel.into_stream();
             let _ = tokio::io::copy_bidirectional(&mut target, &mut stream).await;
         });
@@ -71,6 +90,10 @@ impl russh::server::Handler for TestHandler {
 }
 
 async fn start_ssh_server() -> u16 {
+    start_ssh_server_with_forwarding(true).await
+}
+
+async fn start_ssh_server_with_forwarding(allow_forwarding: bool) -> u16 {
     let key = PrivateKey::from_openssh(HOST_KEY).expect("test host key");
     let config = Arc::new(ServerConfig {
         keys: vec![key],
@@ -80,7 +103,7 @@ async fn start_ssh_server() -> u16 {
         .await
         .expect("bind ssh server");
     let port = listener.local_addr().expect("ssh address").port();
-    let mut server = TestServer;
+    let mut server = TestServer { allow_forwarding };
     tokio::spawn(async move {
         let _ = server.run_on_socket(config, &listener).await;
     });
@@ -170,6 +193,12 @@ async fn forwards_tcp_through_the_ssh_session() {
     });
 
     let mut client = TcpStream::connect(local).await.expect("connect to tunnel");
+    assert_echo(&mut client).await;
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+async fn assert_echo(client: &mut TcpStream) {
     client
         .write_all(b"ping")
         .await
@@ -180,8 +209,6 @@ async fn forwards_tcp_through_the_ssh_session() {
         .expect("echo timed out")
         .expect("read echo");
     assert_eq!(&buffer, b"ping");
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[tokio::test]
@@ -245,5 +272,141 @@ async fn wrong_password_is_rejected() {
         Err(err) => assert_eq!(err.kind, SshErrorKind::Authentication),
     }
 
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn unreadable_trust_record_blocks_authentication() {
+    let dir = temp_dir("invalid-trust");
+    let known_hosts = dir.join("known_hosts");
+    let ssh_port = start_ssh_server().await;
+    std::fs::write(
+        &known_hosts,
+        format!("[127.0.0.1]:{ssh_port} ssh-ed25519\n"),
+    )
+    .expect("write malformed trust record");
+    let mut bad = spec(ssh_port);
+    bad.auth = AuthMaterial::Password("wrong".into());
+
+    match ssh::connect(&bad, &known_hosts).await {
+        Ok(_) => panic!("an invalid trust record must be refused"),
+        Err(err) => assert_eq!(err.kind, SshErrorKind::HostKeyRejected),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn another_host_key_algorithm_is_not_first_contact() {
+    let dir = temp_dir("alternate-key");
+    let known_hosts = dir.join("known_hosts");
+    let ssh_port = start_ssh_server().await;
+    std::fs::write(
+        &known_hosts,
+        format!("[127.0.0.1]:{ssh_port} {ECDSA_PUBLIC_KEY}\n"),
+    )
+    .expect("write existing host key with another algorithm");
+
+    match ssh::connect(&spec(ssh_port), &known_hosts).await {
+        Ok(_) => panic!("another key algorithm must be refused for a known host"),
+        Err(err) => assert_eq!(err.kind, SshErrorKind::HostKeyChanged),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn profile(ssh_port: u16, target_port: u16) -> Profile {
+    Profile {
+        name: "tunnel test".into(),
+        host: "127.0.0.1".into(),
+        port: ssh_port,
+        user: "tester".into(),
+        auth: AuthMethod::Password,
+        remote_host: "127.0.0.1".into(),
+        remote_port: target_port,
+        local_port: 0,
+        remember_password: false,
+        remember_passphrase: false,
+    }
+}
+
+async fn wait_for_state(state: &AppState, expected: &str) -> Status {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let status = read_status(state);
+            if status.state == expected {
+                return status;
+            }
+            assert_ne!(status.state, "failed", "{}", status.message);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("Waiting for {expected}: {}", read_status(state).message))
+}
+
+#[tokio::test]
+async fn denied_forward_is_reported_as_failed() {
+    let dir = temp_dir("denied-forward");
+    let state = Arc::new(AppState::new(dir.clone(), String::new()));
+    let ssh_port = start_ssh_server_with_forwarding(false).await;
+    let mut events = state.events.subscribe();
+    start_session(
+        Arc::clone(&state),
+        profile(ssh_port, 13517),
+        spec(ssh_port).auth,
+    )
+    .await
+    .expect("start tunnel");
+    let failure = wait_for_state(&state, "failed").await;
+    assert!(failure
+        .message
+        .contains("forwarding to 127.0.0.1:13517 failed"));
+    assert!(failure.url.is_none());
+    while let Ok(event) = events.try_recv() {
+        if let crate::UiEvent::Status { status } = event {
+            assert_ne!(status.state, "connected");
+        }
+    }
+    stop(&state).await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn reconnect_can_immediately_reuse_the_previous_local_port() {
+    let dir = temp_dir("reconnect");
+    let state = Arc::new(AppState::new(dir.clone(), String::new()));
+    let ssh_port = start_ssh_server().await;
+    let echo_port = start_echo_server().await;
+    let first = start_session(
+        Arc::clone(&state),
+        profile(ssh_port, echo_port),
+        spec(ssh_port).auth,
+    )
+    .await
+    .expect("start tunnel");
+    for _ in 0..3 {
+        let replacement = reconnect(Arc::clone(&state))
+            .await
+            .expect("rebind the local port");
+        assert_eq!(replacement.local_port, first.local_port);
+    }
+    wait_for_state(&state, "connected").await;
+    let mut browser = TcpStream::connect(("127.0.0.1", first.local_port))
+        .await
+        .expect("open a browser connection before reconnect");
+    assert_echo(&mut browser).await;
+    let replacement = reconnect(Arc::clone(&state))
+        .await
+        .expect("rebind with an existing browser connection");
+    assert_eq!(replacement.local_port, first.local_port);
+    let mut old_data = [0];
+    let read = tokio::time::timeout(Duration::from_secs(3), browser.read(&mut old_data))
+        .await
+        .expect("the old browser connection should close");
+    assert!(matches!(read, Ok(0) | Err(_)));
+    wait_for_state(&state, "connected").await;
+    stop(&state).await;
+    assert!(TcpListener::bind(("127.0.0.1", first.local_port))
+        .await
+        .is_ok());
     let _ = std::fs::remove_dir_all(&dir);
 }
