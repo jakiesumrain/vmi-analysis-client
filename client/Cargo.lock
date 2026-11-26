@@ -2882,6 +2882,7 @@ name = "vmi-analysis-client"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "find-msvc-tools",
  "form_urlencoded",
  "getrandom 0.3.4",
  "http-body-util",

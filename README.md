@@ -6,7 +6,7 @@ Agent from a saved profile. [VMI Analysis server](https://github.com/jakiesumrai
 
 ## Run on Windows
 
-Install Rust 1.90 or newer with the MSVC toolchain. From this checkout, run
+Install Rust 1.90 or newer with the MSVC toolchain and the Windows SDK. From this checkout, run
 
 ```powershell
 cd client
