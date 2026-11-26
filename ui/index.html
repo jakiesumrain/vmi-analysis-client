@@ -12,7 +12,7 @@
         <div class="brand-mark" aria-hidden="true">V</div>
         <div>
           <h1>VMI Analysis Client</h1>
-          <p class="subtitle">SSH tunnel to your VMI server</p>
+          <p class="subtitle">Open VMI Analysis on this computer or over SSH</p>
         </div>
       </div>
       <div class="topbar-right">
@@ -42,6 +42,23 @@
               <input id="name" type="text" placeholder="Lab server" />
             </label>
 
+            <label class="field span-2">
+              <span>Connection mode</span>
+              <select id="connection-mode">
+                <option value="ssh">Shared server (SSH)</option>
+                <option value="local">Local (this computer)</option>
+              </select>
+            </label>
+            <div class="field span-2" id="local-vmi-field" hidden>
+              <label for="local-vmi-checkout">VMI Analysis GUI folder</label>
+              <div class="inline">
+                <input id="local-vmi-checkout" type="text" required disabled />
+                <button type="button" id="browse-checkout" class="button ghost">Browse…</button>
+              </div>
+            </div>
+          </div>
+
+          <fieldset id="ssh-fields" class="grid">
             <label class="field">
               <span>Server host</span>
               <input id="host" type="text" placeholder="vmi.example.org" required />
@@ -87,13 +104,13 @@
               <input id="remember" type="checkbox" />
               <span>Remember the password or passphrase in the OS keychain</span>
             </label>
-          </div>
+          </fieldset>
 
           <details class="advanced">
-            <summary>VMI account and Agent</summary>
+            <summary id="vmi-settings-label">VMI account and Agent</summary>
             <div class="grid">
-              <label class="field span-2"><span>VMI account</span><input id="vmi-account" maxlength="32" autocomplete="off" /></label>
-              <label class="field span-2"><span>VMI account password</span><input id="vmi-password" type="password" maxlength="1024" autocomplete="off" /></label>
+              <label class="field span-2" data-ssh-only><span>VMI account</span><input id="vmi-account" maxlength="32" autocomplete="off" /></label>
+              <label class="field span-2" data-ssh-only><span>VMI account password</span><input id="vmi-password" type="password" maxlength="1024" autocomplete="off" /></label>
               <label class="field span-2"><span>Model endpoint</span><input id="vmi-base-url" type="url" placeholder="https://api.deepseek.com/v1" /></label>
               <label class="field span-2"><span>API format</span>
                 <select id="vmi-api">
@@ -106,10 +123,10 @@
               <label class="field span-2"><span>Image-capable model IDs</span><input id="vmi-image-models" /></label>
               <label class="field span-2"><span>Model API key</span><input id="vmi-api-key" type="password" autocomplete="off" /></label>
             </div>
-            <p class="hint">Save profile to remember the account and Agent settings. Passwords and API keys go in the OS keychain. Leave a secret blank to keep its saved value.</p>
+            <p class="hint">Save the profile to keep your Agent settings. Passwords and API keys go in the OS keychain. Leave a secret blank to keep its saved value.</p>
           </details>
 
-          <details class="advanced">
+          <details class="advanced" id="ssh-options">
             <summary>Advanced</summary>
             <div class="grid">
               <label class="field">
@@ -146,7 +163,7 @@
           <h2 id="status-heading">Tunnel</h2>
         </div>
 
-        <div class="state-block">
+        <div class="state-block" id="tunnel-state">
           <p id="state-message" class="state-message">Not connected.</p>
           <div class="url-row">
             <code id="local-url">No local address yet</code>
@@ -160,6 +177,10 @@
           </p>
           <p id="service-note" class="hint subtle">Local service on 127.0.0.1.</p>
         </div>
+
+        <p id="local-state" class="hint" hidden>
+          The client launches VMI from the selected folder and opens it in your browser.
+        </p>
 
         <div class="log-head">
           <h3>Activity</h3>

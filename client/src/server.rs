@@ -28,6 +28,7 @@ pub fn router(state: SharedState) -> Router {
     let desktop = Router::new()
         .route("/save", post(crate::desktop::save))
         .route("/open", post(crate::desktop::open))
+        .route("/open-local", post(crate::desktop::open_local))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -42,6 +43,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/reconnect", post(reconnect_handler))
         .route("/disconnect", post(disconnect))
         .route("/pick-key", post(pick_key))
+        .route("/pick-checkout", post(pick_checkout))
         .route("/open", post(open_url))
         .route("/quit", post(quit))
         .nest("/desktop", desktop)
@@ -199,6 +201,9 @@ async fn connect(
     Json(request): Json<ConnectRequest>,
 ) -> Result<Json<ConnectInfo>, ApiError> {
     request.profile.validate().map_err(ApiError)?;
+    if request.profile.mode != crate::config::ProfileMode::Ssh {
+        return Err(ApiError("Use Open VMI for a local profile.".into()));
+    }
     let auth =
         resolve_auth(&request.profile, request.password, request.passphrase).map_err(ApiError)?;
     start_session(state, request.profile, auth)
@@ -216,6 +221,14 @@ async fn reconnect_handler(
 async fn disconnect(State(state): State<SharedState>) -> Json<Status> {
     stop(&state).await;
     Json(read_status(&state))
+}
+
+async fn pick_checkout() -> Json<Option<String>> {
+    let picked = tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+        .await
+        .ok()
+        .flatten();
+    Json(picked.map(|path| path.to_string_lossy().into_owned()))
 }
 
 async fn pick_key() -> Json<Option<String>> {

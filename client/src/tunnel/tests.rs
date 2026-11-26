@@ -315,6 +315,8 @@ async fn another_host_key_algorithm_is_not_first_contact() {
 
 fn profile(ssh_port: u16, target_port: u16) -> Profile {
     Profile {
+        mode: crate::config::ProfileMode::Ssh,
+        checkout: None,
         name: "tunnel test".into(),
         host: "127.0.0.1".into(),
         port: ssh_port,

@@ -1,6 +1,6 @@
 # Client / server contract
 
-Status: SSH tunnel launcher with optional saved VMI sign-in.
+Status: SSH tunnel launcher and direct local desktop connection.
 Protocol version: **1**
 
 This contract covers the VMI Analysis client
@@ -125,6 +125,20 @@ The local control panel receives the normal HttpOnly VMI session cookie and
 then opens the forwarded VMI page in that browser. The password and model API
 key stay out of browser navigation and GUI form fields. Both loopback
 listeners use the same browser hostname, so the cookie applies across ports.
+
+## Direct local launch
+
+A local profile points to a VMI Analysis GUI checkout on this computer.
+The client uses `uv` to prepare the checkout's Python environment, then
+starts the existing GUI on loopback and opens it in the browser. Local
+mode requires no SSH connection or VMI account.
+
+The client scopes the saved model key to the checkout path and provider
+URL in the OS keychain. When starting the GUI, it supplies the connection
+to a client-owned startup script in the new Python process. The script
+consumes the credentials from the process environment and starts Agent
+through the checkout's existing Agent backend. No HTTP credentials, extra
+GUI endpoint, or source changes are required.
 
 ## Versioning and compatibility
 
