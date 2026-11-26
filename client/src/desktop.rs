@@ -1,12 +1,12 @@
-//! Optional account linking and Agent launch over the active SSH tunnel.
+//! Sign in and start an optional Agent session over the active SSH tunnel.
 
 use std::time::Duration;
 
-use axum::{extract::State, Json};
+use axum::{extract::State, response::IntoResponse, Json};
 use http_body_util::{BodyExt, Full, Limited};
-use hyper::{body::Bytes, client::conn::http1, Request, StatusCode};
+use hyper::{body::Bytes, client::conn::http1, header, HeaderMap, Request, StatusCode};
 use hyper_util::rt::TokioIo;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::net::TcpStream;
 
@@ -14,7 +14,7 @@ use crate::config::{Profile, ProfileStore};
 use crate::server::ApiError;
 use crate::{read_status, secrets, AppState, SharedState};
 
-const PREFIX: &str = "/client/v1";
+const LOGIN_COOKIE: &str = "vmi_session";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VmiProfile {
@@ -108,12 +108,13 @@ fn valid_token(token: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
 }
 
-async fn request<T: DeserializeOwned>(
+async fn request(
     port: u16,
     path: &str,
-    payload: serde_json::Value,
-    credential: Option<&str>,
-) -> Result<T, String> {
+    content_type: &str,
+    payload: String,
+    cookie: Option<&str>,
+) -> Result<(StatusCode, HeaderMap), String> {
     tokio::time::timeout(Duration::from_secs(50), async {
         let tcp = TcpStream::connect(("127.0.0.1", port))
             .await
@@ -122,38 +123,26 @@ async fn request<T: DeserializeOwned>(
             .await
             .map_err(|_| "Could not open the VMI connection.")?;
         let connection = tokio::spawn(connection);
-        let mut builder = Request::post(format!("{PREFIX}{path}"))
+        let mut builder = Request::post(path)
             .header("host", format!("127.0.0.1:{port}"))
-            .header("content-type", "application/json")
+            .header("content-type", content_type)
             .header("connection", "close");
-        if let Some(token) = credential {
-            builder = builder.header("authorization", format!("Bearer {token}"));
+        if let Some(cookie) = cookie {
+            builder = builder.header("cookie", cookie);
         }
         let result = async {
-            let body = Full::new(Bytes::from(payload.to_string()));
+            let body = Full::new(Bytes::from(payload));
             let outgoing = builder.body(body).map_err(|_| "Invalid desktop request.")?;
             let response = sender
                 .send_request(outgoing)
                 .await
                 .map_err(|_| "Could not send the desktop request.")?;
-            let status = response.status();
-            if !status.is_success() {
-                return Err(match status {
-                    StatusCode::NOT_FOUND => "This VMI server does not support desktop sign-in.",
-                    StatusCode::UNAUTHORIZED => "Link this VMI account again.",
-                    StatusCode::FORBIDDEN => {
-                        "VMI refused the link. Generate a new link code in VMI Settings."
-                    }
-                    _ => "The VMI server could not complete the desktop request.",
-                });
-            }
-            let body = Limited::new(response.into_body(), 16384)
+            let (head, body) = response.into_parts();
+            Limited::new(body, 16384)
                 .collect()
                 .await
-                .map_err(|_| "Could not read the desktop response.")?
-                .to_bytes();
-            serde_json::from_slice(&body)
-                .map_err(|_| "The VMI server returned an invalid response.")
+                .map_err(|_| "Could not read the VMI response.")?;
+            Ok((head.status, head.headers))
         }
         .await;
         connection.abort();
@@ -163,50 +152,22 @@ async fn request<T: DeserializeOwned>(
     .map_err(|_| "VMI did not respond in time.".to_owned())?
 }
 
-#[derive(Deserialize)]
-pub struct PairRequest {
-    profile: Profile,
-    code: String,
-}
-
-#[derive(Deserialize)]
-struct PairResponse {
-    credential: String,
-}
-
-pub async fn pair(
-    State(state): State<SharedState>,
-    Json(mut data): Json<PairRequest>,
-) -> Result<Json<ProfileStore>, ApiError> {
-    let vmi = vmi_profile(&data.profile).map_err(ApiError)?;
-    if !valid_token(&data.code) {
-        return Err(ApiError("Paste the link code from VMI Settings.".into()));
-    }
-    let _connection = state.connection.lock().await;
-    let port = active_port(&state, &data.profile).map_err(ApiError)?;
-    let reply: PairResponse = request(
-        port,
-        "/pair",
-        json!({"account": vmi.account, "code": data.code}),
-        None,
-    )
-    .await
-    .map_err(ApiError)?;
-    if !valid_token(&reply.credential) {
-        return Err(ApiError(
-            "The server returned an invalid desktop credential.".into(),
-        ));
-    }
-    secrets::save(&key_id("device", &data.profile, vmi, ""), &reply.credential)
-        .map_err(ApiError)?;
-    save_profile(&state, &mut data.profile)
-        .map(Json)
-        .map_err(ApiError)
+fn session_cookie(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| {
+            let (pair, _) = value.to_str().ok()?.split_once(';')?;
+            let (name, token) = pair.split_once('=')?;
+            (name == LOGIN_COOKIE && valid_token(token)).then_some(pair)
+        })
+        .next()
 }
 
 #[derive(Deserialize)]
 pub struct SaveRequest {
     profile: Profile,
+    vmi_password: Option<String>,
     api_key: Option<String>,
 }
 
@@ -214,6 +175,13 @@ pub async fn save(
     State(state): State<SharedState>,
     Json(mut data): Json<SaveRequest>,
 ) -> Result<Json<ProfileStore>, ApiError> {
+    if let Some(password) = data.vmi_password.filter(|value| !value.is_empty()) {
+        let vmi = vmi_profile(&data.profile).map_err(ApiError)?;
+        if password.chars().count() > 1024 || password.contains('\0') {
+            return Err(ApiError("Enter a valid VMI account password.".into()));
+        }
+        secrets::save(&key_id("password", &data.profile, vmi, ""), &password).map_err(ApiError)?;
+    }
     if let Some(key) = data.api_key.filter(|key| !key.is_empty()) {
         let vmi = vmi_profile(&data.profile).map_err(ApiError)?;
         let agent = vmi
@@ -231,58 +199,124 @@ pub async fn save(
         .map_err(ApiError)
 }
 
-#[derive(Deserialize)]
-struct LaunchResponse {
-    ticket: String,
-    warning: Option<String>,
-}
-
 pub async fn open(
     State(state): State<SharedState>,
     Json(profile): Json<Profile>,
-) -> Result<Json<Option<String>>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     let vmi = vmi_profile(&profile).map_err(ApiError)?;
     let _connection = state.connection.lock().await;
     let port = active_port(&state, &profile).map_err(ApiError)?;
-    let credential = secrets::load(&key_id("device", &profile, vmi, ""))
+    let password = secrets::load(&key_id("password", &profile, vmi, ""))
         .map_err(ApiError)?
-        .ok_or_else(|| ApiError("Link your VMI account before using desktop sign-in.".into()))?;
-    let mut warning = None;
+        .ok_or_else(|| {
+            ApiError("Save the VMI account password in the client profile first.".into())
+        })?;
+    let form = form_urlencoded::Serializer::new(String::new())
+        .append_pair("username", &vmi.account)
+        .append_pair("password", &password)
+        .finish();
+    let (status, headers) = request(
+        port,
+        "/login",
+        "application/x-www-form-urlencoded",
+        form,
+        None,
+    )
+    .await
+    .map_err(ApiError)?;
+    match status {
+        StatusCode::SEE_OTHER => (),
+        StatusCode::UNAUTHORIZED => {
+            return Err(ApiError(
+                "VMI rejected the saved account name or password.".into(),
+            ))
+        }
+        StatusCode::TOO_MANY_REQUESTS => {
+            return Err(ApiError(
+                "VMI sign-in is temporarily rate-limited. Try again shortly.".into(),
+            ))
+        }
+        _ => {
+            return Err(ApiError(
+                "The VMI server did not accept the sign-in request.".into(),
+            ))
+        }
+    }
+    let session = session_cookie(&headers)
+        .ok_or_else(|| ApiError("The VMI server did not return a valid session cookie.".into()))?;
+    let mut warning: Option<String> = None;
     let agent = if let Some(settings) = &vmi.agent {
-        match secrets::load(&key_id("model", &profile, vmi, &settings.base_url))
-            .map_err(ApiError)?
-        {
-            Some(key) => Some(json!({
+        match secrets::load(&key_id("model", &profile, vmi, &settings.base_url)) {
+            Ok(Some(key)) => Some(json!({
                 "base_url": settings.base_url, "api": settings.api, "model": settings.model,
                 "additional_models": settings.additional_models, "image_models": settings.image_models,
                 "api_key": key,
             })),
-            None => {
+            Ok(None) => {
                 warning = Some("No API key saved for this model endpoint. VMI was opened without starting Agent.".into());
+                None
+            }
+            Err(_) => {
+                warning = Some("VMI signed in. The saved model API key could not be read.".into());
                 None
             }
         }
     } else {
         None
     };
-    let reply: LaunchResponse = request(
-        port,
-        "/launch",
-        json!({"account": vmi.account, "agent": agent}),
-        Some(&credential),
-    )
-    .await
-    .map_err(ApiError)?;
-    if !valid_token(&reply.ticket) {
-        return Err(ApiError(
-            "The server returned an invalid sign-in ticket.".into(),
-        ));
+    if let Some(agent) = agent {
+        warning = match request(
+            port,
+            "/api/agent/session",
+            "application/json",
+            agent.to_string(),
+            Some(session),
+        )
+        .await
+        {
+            Ok((StatusCode::OK, _)) => None,
+            Ok((StatusCode::FORBIDDEN, _)) => {
+                Some("Agent is unavailable in manual-only mode.".into())
+            }
+            Ok((StatusCode::NOT_FOUND, _)) => {
+                Some("This VMI server does not support starting Agent from the client.".into())
+            }
+            _ => Some("VMI signed in. Agent could not start with the saved settings.".into()),
+        };
     }
-    let address = format!(
-        "http://127.0.0.1:{port}{PREFIX}/open#account={}&ticket={}",
-        vmi.account, reply.ticket
-    );
-    open::that(&address)
-        .map_err(|_| ApiError("Could not open VMI in the default browser.".into()))?;
-    Ok(Json(reply.warning.or(warning)))
+    // Both listeners use 127.0.0.1. Browsers scope cookies to the host
+    // irrespective of port, so the normal VMI session applies after navigation.
+    let cookie = format!("{session}; Path=/; HttpOnly; SameSite=Strict");
+    Ok((
+        [
+            (header::SET_COOKIE, cookie),
+            (header::CACHE_CONTROL, "no-store".into()),
+        ],
+        Json(warning),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_only_the_normal_vmi_session_cookie() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            header::SET_COOKIE,
+            "unrelated=value; Path=/".parse().unwrap(),
+        );
+        headers.append(
+            header::SET_COOKIE,
+            "vmi_session=bad; Path=/".parse().unwrap(),
+        );
+        let token = "A".repeat(43);
+        let pair = format!("{LOGIN_COOKIE}={token}");
+        headers.append(
+            header::SET_COOKIE,
+            format!("{pair}; Path=/; HttpOnly").parse().unwrap(),
+        );
+        assert_eq!(session_cookie(&headers), Some(pair.as_str()));
+    }
 }

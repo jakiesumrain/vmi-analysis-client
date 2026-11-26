@@ -1,6 +1,6 @@
 # Client / server contract
 
-Status: SSH tunnel launcher with optional desktop account linking.
+Status: SSH tunnel launcher with optional saved VMI sign-in.
 Protocol version: **1**
 
 This contract covers the VMI Analysis client
@@ -110,24 +110,21 @@ require desktop sign-in for regular tunneling.
 
 ## Optional desktop sign-in
 
-Users sign in normally once and generate a five-minute code under **Settings →
-Desktop client**. The client exchanges the one-use code and account name
-at `POST /client/v1/pair` through the active SSH tunnel. The server stores a
-hash of the new device credential. Linking again replaces the previous link.
-Use **Revoke access** in VMI Settings to invalidate the credential and pending
-launch tickets.
+The client can save the VMI account password and the model API key in the
+OS keychain, scoped to the saved server and account. The model key also
+belongs to the exact provider URL. Connection preferences and model IDs
+live in the profile.
 
-The client saves the device credential and model API key to the OS keychain,
-scoped to the saved server and account. It scopes the model key to the exact
-provider URL. Connection preferences and model IDs live in the profile.
+The client submits the saved account to VMI's normal `POST /login` over
+the active SSH tunnel. If the profile has model settings and a key, the
+client calls the authenticated `POST /api/agent/session` with that session.
+This endpoint starts the account's Agent, or returns success for an already
+active Agent. Manual-only servers refuse the Agent request.
 
-`POST /client/v1/launch` accepts the device credential as a bearer token and
-the account and optional Agent settings in a JSON body. The server can reuse
-the account's active Agent or start one with its usual session-only key handling.
-The response contains a one-use, 60-second sign-in ticket. The client opens
-`/client/v1/open` with the ticket and account in the fragment. The page removes
-the fragment, posts the ticket to `/client/v1/consume`, and receives the normal
-VMI session cookie. A browser signed into another account must sign out first.
+The local control panel receives the normal HttpOnly VMI session cookie and
+then opens the forwarded VMI page in that browser. The password and model API
+key stay out of browser navigation and GUI form fields. Both loopback
+listeners use the same browser hostname, so the cookie applies across ports.
 
 ## Versioning and compatibility
 

@@ -26,7 +26,6 @@ const APP_JS: &str = include_str!("../../ui/app.js");
 
 pub fn router(state: SharedState) -> Router {
     let desktop = Router::new()
-        .route("/pair", post(crate::desktop::pair))
         .route("/save", post(crate::desktop::save))
         .route("/open", post(crate::desktop::open))
         .layer(middleware::from_fn_with_state(

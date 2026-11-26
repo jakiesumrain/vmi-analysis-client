@@ -45,8 +45,7 @@ const ui = {
   version: el("version"),
   service: el("service-note"),
   vmiAccount: el("vmi-account"),
-  vmiCode: el("vmi-code"),
-  vmiLink: el("vmi-link"),
+  vmiPassword: el("vmi-password"),
   vmiBase: el("vmi-base-url"),
   vmiApi: el("vmi-api"),
   vmiModels: el("vmi-models"),
@@ -131,7 +130,6 @@ function applyStatus(next) {
   ui.copy.disabled = !status.url;
   ui.disconnect.disabled = !(connected || busyState);
   ui.connect.disabled = connected || busyState;
-  ui.vmiLink.disabled = !connected;
   setBusy(false);
 
   if (state === "disconnected" || state === "failed") autoOpenedUrl = null;
@@ -160,7 +158,7 @@ function fillForm(profile) {
   ui.passphrase.value = "";
   const vmi = profile.vmi;
   ui.vmiAccount.value = vmi?.account || "";
-  ui.vmiCode.value = "";
+  ui.vmiPassword.value = "";
   ui.vmiKey.value = "";
   ui.vmiBase.value = vmi?.agent?.base_url || "";
   ui.vmiApi.value = vmi?.agent?.api || "openai-completions";
@@ -270,9 +268,10 @@ async function saveProfile() {
     const profile = readForm();
     const store = await api("/api/desktop/save", {
       method: "POST",
-      body: JSON.stringify({ profile, api_key: ui.vmiKey.value }),
+      body: JSON.stringify({ profile, vmi_password: ui.vmiPassword.value, api_key: ui.vmiKey.value }),
     });
     ui.vmiKey.value = "";
+    ui.vmiPassword.value = "";
     if (connectedProfile) connectedProfile = profile;
     refreshProfiles(store);
     ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
@@ -320,6 +319,7 @@ async function openTunnel() {
       try {
         const warning = await api("/api/desktop/open", { method: "POST", body: JSON.stringify(profile) });
         if (warning) logLine("warn", warning);
+        window.location.assign(status.url);
         return;
       } catch (err) {
         showError(err.message);
@@ -328,27 +328,6 @@ async function openTunnel() {
     await api("/api/open", { method: "POST", body: JSON.stringify({ url: status.url }) });
   } catch (err) {
     logLine("error", err.message);
-  }
-}
-
-async function pairVmi() {
-  showError("");
-  ui.vmiLink.disabled = true;
-  try {
-    const profile = readForm();
-    const store = await api("/api/desktop/pair", {
-      method: "POST",
-      body: JSON.stringify({ profile, code: ui.vmiCode.value.trim() }),
-    });
-    ui.vmiCode.value = "";
-    connectedProfile = profile;
-    refreshProfiles(store);
-    ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
-    logLine("info", "VMI account linked.");
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    ui.vmiLink.disabled = status.state !== "connected";
   }
 }
 
@@ -429,7 +408,6 @@ async function init() {
   ui.remove.addEventListener("click", deleteProfile);
   ui.disconnect.addEventListener("click", disconnect);
   ui.open.addEventListener("click", openTunnel);
-  ui.vmiLink.addEventListener("click", pairVmi);
   ui.vmiAccount.addEventListener("input", () => setBusy(false));
   ui.copy.addEventListener("click", copyUrl);
   ui.quit.addEventListener("click", quitClient);
