@@ -16,9 +16,9 @@ below is relative to this client repository.
 | Client (this one) | `.` | <https://github.com/jakiesumrain/vmi-analysis-client> |
 | Server | `../vmi-analysis-gui` | <https://github.com/jakiesumrain/vmi-analysis-gui> |
 
-- Server revision used for this draft: `a4ffbf9` on `feature/agent-panel`
-  (update this pin when the shared-server changes are merged or the client
-  starts consuming a different server revision).
+- Agent startup via `POST /api/agent/session` requires server commit
+  `69b968e` or a later revision containing that change.
+  [Server change](https://github.com/jakiesumrain/vmi-analysis-gui/pull/95)
 
 ## Network shape
 
@@ -128,19 +128,10 @@ listeners use the same browser hostname, so the cookie applies across ports.
 
 ## Versioning and compatibility
 
-The client build records:
-
-```json
-{
-  "client_protocol": 1,
-  "server_contract": 1,
-  "server_revision": "a4ffbf9"
-}
-```
-
-A future client may display a warning when the server's documented contract
-version differs. There is no server handshake in Phase 1; document any
-compatibility assumption here before adding one.
+The client uses the existing browser login endpoint and requests Agent
+startup only when the profile includes model settings and a saved key.
+If the server lacks the Agent endpoint or runs in manual-only mode, the
+client still opens the signed-in GUI.
 
 ## Phase 2 (not part of this contract yet)
 
