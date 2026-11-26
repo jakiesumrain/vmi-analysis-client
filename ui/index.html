@@ -90,6 +90,26 @@
           </div>
 
           <details class="advanced">
+            <summary>VMI account and Agent</summary>
+            <div class="grid">
+              <label class="field span-2"><span>VMI account</span><input id="vmi-account" maxlength="32" autocomplete="off" /></label>
+              <label class="field span-2"><span>VMI account password</span><input id="vmi-password" type="password" maxlength="1024" autocomplete="off" /></label>
+              <label class="field span-2"><span>Model endpoint</span><input id="vmi-base-url" type="url" placeholder="https://api.deepseek.com/v1" /></label>
+              <label class="field span-2"><span>API format</span>
+                <select id="vmi-api">
+                  <option value="openai-completions">OpenAI compatible</option>
+                  <option value="openai-responses">OpenAI Responses</option>
+                  <option value="anthropic-messages">Anthropic Messages</option>
+                </select>
+              </label>
+              <label class="field span-2"><span>Model IDs (first is default)</span><input id="vmi-models" placeholder="model-id, another-model-id" /></label>
+              <label class="field span-2"><span>Image-capable model IDs</span><input id="vmi-image-models" /></label>
+              <label class="field span-2"><span>Model API key</span><input id="vmi-api-key" type="password" autocomplete="off" /></label>
+            </div>
+            <p class="hint">Save profile to remember the account and Agent settings. Passwords and API keys go in the OS keychain. Leave a secret blank to keep its saved value.</p>
+          </details>
+
+          <details class="advanced">
             <summary>Advanced</summary>
             <div class="grid">
               <label class="field">

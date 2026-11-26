@@ -325,6 +325,7 @@ fn profile(ssh_port: u16, target_port: u16) -> Profile {
         local_port: 0,
         remember_password: false,
         remember_passphrase: false,
+        vmi: None,
     }
 }
 

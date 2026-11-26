@@ -62,6 +62,17 @@ required by every API call.
 Use **Save profile** to keep the connection settings. Passwords are stored only
 when **Remember** is checked, and then only in the OS keychain.
 
+### Remember a VMI account and Agent settings
+
+In the client, open **VMI account and Agent**, enter your VMI account name and
+password, then choose **Save profile**. Include model settings and an API key
+if you want the client to start the Agent as well.
+
+On later launches, select the profile and connect. The client opens the GUI in
+the same browser tab and signs in using the saved account. The VMI password
+and model API key live in the OS keychain. When you change your VMI password,
+update the saved profile in the client.
+
 ## Files
 
 Everything lives in the application-config directory, for example

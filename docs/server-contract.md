@@ -1,6 +1,6 @@
 # Client / server contract
 
-Status: **Phase 1 draft** — SSH tunnel launcher only.
+Status: SSH tunnel launcher with optional saved VMI sign-in.
 Protocol version: **1**
 
 This contract covers the VMI Analysis client
@@ -92,9 +92,9 @@ The server account should be restricted to the forwarding needed for VMI:
 
 The client must not request a remote shell, a PTY, or remote forwarding.
 
-## Phase 1: no server API
+## Browser-only connection
 
-There is no custom API between the client and the server. The contract is:
+The GUI works through a plain SSH forward with ordinary browser sign-in:
 
 ```text
 SSH local forward + existing NiceGUI web application + browser
@@ -106,7 +106,25 @@ plumbing, not part of the client/server contract, and must never be exposed on
 a network interface.
 
 The client must not scrape the GUI, inject credentials into the page, or
-require server-side code changes.
+require desktop sign-in for regular tunneling.
+
+## Optional desktop sign-in
+
+The client can save the VMI account password and the model API key in the
+OS keychain, scoped to the saved server and account. The model key also
+belongs to the exact provider URL. Connection preferences and model IDs
+live in the profile.
+
+The client submits the saved account to VMI's normal `POST /login` over
+the active SSH tunnel. If the profile has model settings and a key, the
+client calls the authenticated `POST /api/agent/session` with that session.
+This endpoint starts the account's Agent, or returns success for an already
+active Agent. Manual-only servers refuse the Agent request.
+
+The local control panel receives the normal HttpOnly VMI session cookie and
+then opens the forwarded VMI page in that browser. The password and model API
+key stay out of browser navigation and GUI form fields. Both loopback
+listeners use the same browser hostname, so the cookie applies across ports.
 
 ## Versioning and compatibility
 

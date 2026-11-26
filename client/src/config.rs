@@ -60,6 +60,8 @@ pub struct Profile {
     /// Keep an encrypted key file's passphrase in the OS keychain.
     #[serde(default)]
     pub remember_passphrase: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vmi: Option<crate::desktop::VmiProfile>,
 }
 
 impl Profile {
@@ -203,6 +205,7 @@ mod tests {
             local_port: 0,
             remember_password: false,
             remember_passphrase: false,
+            vmi: None,
         }
     }
 

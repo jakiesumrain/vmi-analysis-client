@@ -27,13 +27,13 @@ fn entry(account: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, account).map_err(|err| format!("Keychain is unavailable: {err}"))
 }
 
-fn save(account: &str, secret: &str) -> Result<(), String> {
+pub(crate) fn save(account: &str, secret: &str) -> Result<(), String> {
     entry(account)?
         .set_password(secret)
         .map_err(|err| format!("Could not save to the keychain: {err}"))
 }
 
-fn load(account: &str) -> Result<Option<String>, String> {
+pub(crate) fn load(account: &str) -> Result<Option<String>, String> {
     match entry(account)?.get_password() {
         Ok(secret) => Ok(Some(secret)),
         Err(KeyringError::NoEntry) => Ok(None),
@@ -90,6 +90,7 @@ mod tests {
             local_port: 0,
             remember_password: true,
             remember_passphrase: false,
+            vmi: None,
         }
     }
 
