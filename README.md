@@ -1,6 +1,6 @@
 # VMI Analysis Client
 
-Open a local VMI Analysis GUI or connect to a shared server over SSH.
+Launch VMI Analysis from a local checkout or connect to a shared server over SSH.
 The client can start Agent from a saved model connection. [VMI Analysis server](https://github.com/jakiesumrain/vmi-analysis-gui)
 
 ## Run on Windows
@@ -19,19 +19,13 @@ browser tab leaves the tunnel running.
 
 ## Use VMI on this computer
 
-Choose **Local (this computer)** and enter the port shown by the running
-VMI GUI. Choose **Open VMI** to open it in your browser.
+Install `uv` and make it available to the client. Select **Local (this computer)**,
+then choose the root folder of your VMI Analysis GUI checkout. To start Agent,
+install the Pi version specified by that checkout and save your model settings
+and key under **Agent connection**. The key goes in the OS keychain.
 
-To start Agent with a saved key, launch the GUI from its checkout:
-
-```powershell
-$env:VMI_GUI_LOCAL_CLIENT = '1'
-uv run vmi-analysis
-```
-
-In the client, open **Agent connection**, enter your model settings and key,
-and choose **Save profile**. Then choose **Open VMI**. The key goes in the
-OS keychain.
+Choose **Open VMI**. The client prepares the checkout's Python environment,
+launches the GUI, and opens it in your browser.
 
 ## Connect over SSH
 

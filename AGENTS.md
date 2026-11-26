@@ -51,8 +51,8 @@ either. The panel must bind loopback only and require a per-run token.
 
 ## Boundary rules
 
-- Use the SSH forward for shared servers. Direct local profiles connect to
-  the single-user GUI on this computer's loopback address.
+- Use the SSH forward for shared servers. Direct local profiles launch
+  the single-user GUI from a checkout on this computer.
 - The control panel is HTTP on `127.0.0.1` only, with a per-run bearer token.
   Never bind it to a network interface and never drop the token check.
 - Use local forwarding only. Do not enable arbitrary shell or remote

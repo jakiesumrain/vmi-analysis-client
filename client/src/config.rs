@@ -49,6 +49,8 @@ pub struct Profile {
     pub name: String,
     #[serde(default)]
     pub mode: ProfileMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
     #[serde(default)]
     pub host: String,
     #[serde(default = "default_ssh_port")]
@@ -81,7 +83,7 @@ impl Profile {
         if self.name.trim().is_empty() {
             match self.mode {
                 ProfileMode::Ssh => format!("{}@{}", self.user, self.host),
-                ProfileMode::Local => format!("Local VMI ({})", self.remote_port),
+                ProfileMode::Local => "Local VMI".into(),
             }
         } else {
             self.name.trim().to_owned()
@@ -89,11 +91,12 @@ impl Profile {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.mode == ProfileMode::Local {
+            self.local_checkout()?;
+            return Ok(());
+        }
         if self.remote_port == 0 {
             return Err("The VMI web port must be between 1 and 65535.".into());
-        }
-        if self.mode == ProfileMode::Local {
-            return Ok(());
         }
         let host = self.host.trim();
         if host.is_empty() {
@@ -119,7 +122,23 @@ impl Profile {
         Ok(())
     }
 
-    /// The local URL used once the tunnel is up.
+    pub fn local_checkout(&self) -> Result<PathBuf, String> {
+        let path = expand_path(self.checkout.as_deref().unwrap_or_default());
+        if !path.is_absolute() {
+            return Err("Choose the folder containing your VMI Analysis GUI checkout.".into());
+        }
+        let path = path
+            .canonicalize()
+            .map_err(|_| "The VMI Analysis GUI folder could not be opened.")?;
+        if !path.join("pyproject.toml").is_file()
+            || !path.join("src/vmi_analysis/gui/app.py").is_file()
+        {
+            return Err("Choose the VMI Analysis GUI repository root.".into());
+        }
+        Ok(path)
+    }
+
+    /// The local URL used by SSH and local launches.
     pub fn local_url(&self, local_port: u16) -> String {
         format!("http://127.0.0.1:{local_port}")
     }
@@ -215,6 +234,7 @@ mod tests {
         Profile {
             name: "Lab server".into(),
             mode: ProfileMode::Ssh,
+            checkout: None,
             host: "vmi.example.org".into(),
             port: 22,
             user: "alice".into(),
@@ -240,16 +260,9 @@ mod tests {
     }
 
     #[test]
-    fn local_profile_needs_only_the_gui_port() {
-        let mut profile: Profile =
-            serde_json::from_str(r#"{"mode":"local","remote_port":14001}"#).expect("parse");
-        assert!(profile.validate().is_ok());
-        assert_eq!(profile.display_name(), "Local VMI (14001)");
-        assert_eq!(
-            profile.local_url(profile.remote_port),
-            "http://127.0.0.1:14001"
-        );
-        profile.remote_port = 0;
+    fn local_profile_requires_a_checkout() {
+        let profile: Profile = serde_json::from_str(r#"{"mode":"local"}"#).expect("parse");
+        assert_eq!(profile.display_name(), "Local VMI");
         assert!(profile.validate().is_err());
     }
 

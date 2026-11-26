@@ -8,6 +8,7 @@
 mod config;
 mod desktop;
 mod diag;
+mod local_gui;
 mod secrets;
 mod server;
 mod ssh;
@@ -89,6 +90,7 @@ pub struct AppState {
     pub status: Mutex<Status>,
     connection: tokio::sync::Mutex<Option<ActiveConnection>>,
     pub last: Mutex<Option<LastSession>>,
+    pub(crate) local_guis: tokio::sync::Mutex<Vec<local_gui::LocalGui>>,
     pub profiles_path: PathBuf,
     pub known_hosts_path: PathBuf,
     pub events: broadcast::Sender<UiEvent>,
@@ -111,6 +113,7 @@ impl AppState {
             status: Mutex::new(Status::default()),
             connection: tokio::sync::Mutex::new(None),
             last: Mutex::new(None),
+            local_guis: tokio::sync::Mutex::new(Vec::new()),
             profiles_path,
             known_hosts_path: config_dir.join("known_hosts"),
             events,

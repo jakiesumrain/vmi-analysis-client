@@ -43,6 +43,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/reconnect", post(reconnect_handler))
         .route("/disconnect", post(disconnect))
         .route("/pick-key", post(pick_key))
+        .route("/pick-checkout", post(pick_checkout))
         .route("/open", post(open_url))
         .route("/quit", post(quit))
         .nest("/desktop", desktop)
@@ -220,6 +221,14 @@ async fn reconnect_handler(
 async fn disconnect(State(state): State<SharedState>) -> Json<Status> {
     stop(&state).await;
     Json(read_status(&state))
+}
+
+async fn pick_checkout() -> Json<Option<String>> {
+    let picked = tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+        .await
+        .ok()
+        .flatten();
+    Json(picked.map(|path| path.to_string_lossy().into_owned()))
 }
 
 async fn pick_key() -> Json<Option<String>> {

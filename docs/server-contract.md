@@ -126,20 +126,19 @@ then opens the forwarded VMI page in that browser. The password and model API
 key stay out of browser navigation and GUI form fields. Both loopback
 listeners use the same browser hostname, so the cookie applies across ports.
 
-## Direct local connection
+## Direct local launch
 
-A local profile opens an existing VMI GUI at `http://127.0.0.1:<port>`.
-The default port is 13517. This mode uses the browser and the GUI's
-single-user workspace. It requires neither SSH nor a VMI account.
+A local profile points to a VMI Analysis GUI checkout on this computer.
+The client uses `uv` to prepare the checkout's Python environment, then
+starts the existing GUI on loopback and opens it in the browser. Local
+mode requires no SSH connection or VMI account.
 
-To start Agent using the client's saved model connection, launch the GUI
-with `VMI_GUI_LOCAL_CLIENT=1`. The GUI binds to `127.0.0.1` and exposes a
-desktop-only endpoint. The client first sends `HEAD /api/local-client`
-and requires status 204 with `X-VMI-Local-Client: 1`. It then sends the
-same JSON model connection as the shared startup endpoint to
-`POST /api/local-client`. The GUI checks the loopback peer and Host and
-accepts only direct, non-browser requests. The local model key is scoped
-to the local GUI port and provider URL in the OS keychain.
+The client scopes the saved model key to the checkout path and provider
+URL in the OS keychain. When starting the GUI, it supplies the connection
+to a client-owned startup script in the new Python process. The script
+consumes the credentials from the process environment and starts Agent
+through the checkout's existing Agent backend. No HTTP credentials, extra
+GUI endpoint, or source changes are required.
 
 ## Versioning and compatibility
 

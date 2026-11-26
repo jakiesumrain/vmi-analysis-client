@@ -13,7 +13,7 @@ const ui = {
   form: el("connection-form"),
   name: el("name"),
   mode: el("connection-mode"),
-  localVmi: el("local-vmi-port"),
+  localVmi: el("local-vmi-checkout"),
   localVmiField: el("local-vmi-field"),
   sshFields: el("ssh-fields"),
   sshOptions: el("ssh-options"),
@@ -70,7 +70,7 @@ let openingLocal = false;
 
 const isLocal = () => ui.mode.value === "local";
 const profileName = (profile) => profile.name || (profile.mode === "local"
-  ? `Local VMI (${profile.remote_port})` : `${profile.user}@${profile.host}`);
+  ? "Local VMI" : `${profile.user}@${profile.host}`);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -164,7 +164,7 @@ function applyStatus(next) {
 function fillForm(profile) {
   ui.name.value = profile.name || "";
   ui.mode.value = profile.mode || "ssh";
-  ui.localVmi.value = profile.mode === "local" ? profile.remote_port || 13517 : 13517;
+  ui.localVmi.value = profile.checkout || "";
   ui.host.value = profile.host || "";
   ui.port.value = profile.port || 22;
   ui.user.value = profile.user || "";
@@ -230,7 +230,7 @@ function readForm() {
     return {
       mode: "local",
       name: ui.name.value.trim(),
-      remote_port: Number(ui.localVmi.value),
+      checkout: ui.localVmi.value.trim(),
       vmi: agent ? { agent } : null,
     };
   }
@@ -400,11 +400,11 @@ async function copyUrl() {
   }
 }
 
-async function browseKey() {
+async function browse(endpoint, input) {
   try {
-    const path = await api("/api/pick-key", { method: "POST", body: "{}" });
+    const path = await api(endpoint, { method: "POST", body: "{}" });
     if (path) {
-      ui.keyPath.value = path;
+      input.value = path;
     }
   } catch (err) {
     logLine("warn", err.message);
@@ -472,7 +472,8 @@ async function init() {
   ui.vmiAccount.addEventListener("input", () => setBusy(false));
   ui.copy.addEventListener("click", copyUrl);
   ui.quit.addEventListener("click", quitClient);
-  el("browse-key").addEventListener("click", browseKey);
+  el("browse-key").addEventListener("click", () => browse("/api/pick-key", ui.keyPath));
+  el("browse-checkout").addEventListener("click", () => browse("/api/pick-checkout", ui.localVmi));
   ui.clearLog.addEventListener("click", () => ui.log.replaceChildren());
   ui.profileSelect.addEventListener("change", () => {
     const profile = selectedProfile();

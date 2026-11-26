@@ -49,10 +49,13 @@
                 <option value="local">Local (this computer)</option>
               </select>
             </label>
-            <label class="field span-2" id="local-vmi-field" hidden>
-              <span>Local VMI port</span>
-              <input id="local-vmi-port" type="number" min="1" max="65535" value="13517" required disabled />
-            </label>
+            <div class="field span-2" id="local-vmi-field" hidden>
+              <label for="local-vmi-checkout">VMI Analysis GUI folder</label>
+              <div class="inline">
+                <input id="local-vmi-checkout" type="text" required disabled />
+                <button type="button" id="browse-checkout" class="button ghost">Browse…</button>
+              </div>
+            </div>
           </div>
 
           <fieldset id="ssh-fields" class="grid">
@@ -176,8 +179,7 @@
         </div>
 
         <p id="local-state" class="hint" hidden>
-          Open a VMI GUI already running on this computer.
-          For saved Agent startup, launch VMI with VMI_GUI_LOCAL_CLIENT=1.
+          The client launches VMI from the selected folder and opens it in your browser.
         </p>
 
         <div class="log-head">
