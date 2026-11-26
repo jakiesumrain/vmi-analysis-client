@@ -23,7 +23,7 @@ use crate::{
 const INDEX_HTML: &str = include_str!("../../ui/index.html");
 const STYLE_CSS: &str = include_str!("../../ui/style.css");
 const APP_JS: &str = include_str!("../../ui/app.js");
-const ICON_SVG: &str = include_str!("../assets/vmi.svg");
+const ICON_PNG: &[u8] = include_bytes!("../assets/vmi.png");
 
 pub fn router(state: SharedState) -> Router {
     let desktop = Router::new()
@@ -54,7 +54,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/", get(index))
         .route("/style.css", get(style))
         .route("/app.js", get(script))
-        .route("/vmi.svg", get(icon))
+        .route("/vmi.png", get(icon))
         .nest("/api", api)
         .with_state(state)
 }
@@ -134,7 +134,7 @@ async fn style() -> impl IntoResponse {
 }
 
 async fn icon() -> impl IntoResponse {
-    ([(header::CONTENT_TYPE, "image/svg+xml")], ICON_SVG)
+    ([(header::CONTENT_TYPE, "image/png")], ICON_PNG)
 }
 
 async fn script() -> impl IntoResponse {
