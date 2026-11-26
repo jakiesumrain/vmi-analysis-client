@@ -33,15 +33,27 @@ pub enum AuthMethod {
     KeyFile { path: String },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileMode {
+    #[default]
+    Ssh,
+    Local,
+}
+
 /// A saved connection profile.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Profile {
     /// Display name. Defaults to `user@host` when the user leaves it empty.
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub mode: ProfileMode,
+    #[serde(default)]
     pub host: String,
     #[serde(default = "default_ssh_port")]
     pub port: u16,
+    #[serde(default)]
     pub user: String,
     #[serde(default)]
     pub auth: AuthMethod,
@@ -67,13 +79,22 @@ pub struct Profile {
 impl Profile {
     pub fn display_name(&self) -> String {
         if self.name.trim().is_empty() {
-            format!("{}@{}", self.user, self.host)
+            match self.mode {
+                ProfileMode::Ssh => format!("{}@{}", self.user, self.host),
+                ProfileMode::Local => format!("Local VMI ({})", self.remote_port),
+            }
         } else {
             self.name.trim().to_owned()
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        if self.remote_port == 0 {
+            return Err("The VMI web port must be between 1 and 65535.".into());
+        }
+        if self.mode == ProfileMode::Local {
+            return Ok(());
+        }
         let host = self.host.trim();
         if host.is_empty() {
             return Err("A server host name or address is required.".into());
@@ -86,9 +107,6 @@ impl Profile {
         }
         if self.port == 0 {
             return Err("The SSH port must be between 1 and 65535.".into());
-        }
-        if self.remote_port == 0 {
-            return Err("The server web port must be between 1 and 65535.".into());
         }
         if self.remote_host.trim().is_empty() {
             return Err("The server target address is required.".into());
@@ -196,6 +214,7 @@ mod tests {
     fn sample() -> Profile {
         Profile {
             name: "Lab server".into(),
+            mode: ProfileMode::Ssh,
             host: "vmi.example.org".into(),
             port: 22,
             user: "alice".into(),
@@ -212,11 +231,26 @@ mod tests {
     #[test]
     fn defaults_target_the_vmi_port() {
         let profile: Profile = serde_json::from_str(r#"{"host":"h","user":"u"}"#).expect("parse");
+        assert_eq!(profile.mode, ProfileMode::Ssh);
         assert_eq!(profile.port, DEFAULT_SSH_PORT);
         assert_eq!(profile.remote_host, DEFAULT_REMOTE_HOST);
         assert_eq!(profile.remote_port, DEFAULT_REMOTE_PORT);
         assert_eq!(profile.local_port, 0);
         assert_eq!(profile.auth, AuthMethod::Password);
+    }
+
+    #[test]
+    fn local_profile_needs_only_the_gui_port() {
+        let mut profile: Profile =
+            serde_json::from_str(r#"{"mode":"local","remote_port":14001}"#).expect("parse");
+        assert!(profile.validate().is_ok());
+        assert_eq!(profile.display_name(), "Local VMI (14001)");
+        assert_eq!(
+            profile.local_url(profile.remote_port),
+            "http://127.0.0.1:14001"
+        );
+        profile.remote_port = 0;
+        assert!(profile.validate().is_err());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Sign in and start an optional Agent session over the active SSH tunnel.
+//! Open a local GUI or sign in over SSH, with optional Agent startup.
 
 use std::time::Duration;
 
@@ -7,17 +7,19 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, header, HeaderMap, Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tokio::net::TcpStream;
 
-use crate::config::{Profile, ProfileStore};
+use crate::config::{Profile, ProfileMode, ProfileStore};
 use crate::server::ApiError;
 use crate::{read_status, secrets, AppState, SharedState};
 
 const LOGIN_COOKIE: &str = "vmi_session";
+const LOCAL_CLIENT_PATH: &str = "/api/local-client";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VmiProfile {
+    #[serde(default)]
     pub account: String,
     pub agent: Option<AgentProfile>,
 }
@@ -34,6 +36,9 @@ pub struct AgentProfile {
 }
 
 fn server_identity(profile: &Profile) -> String {
+    if profile.mode == ProfileMode::Local {
+        return json!(["local", profile.remote_port]).to_string();
+    }
     json!([
         profile.host.trim().to_ascii_lowercase(),
         profile.port,
@@ -53,7 +58,17 @@ fn key_id(kind: &str, profile: &Profile, vmi: &VmiProfile, provider: &str) -> St
 
 fn vmi_profile(profile: &Profile) -> Result<&VmiProfile, String> {
     profile.validate()?;
-    let vmi = profile.vmi.as_ref().ok_or("Enter a VMI account name.")?;
+    let vmi = profile
+        .vmi
+        .as_ref()
+        .ok_or("Enter the VMI connection settings.")?;
+    if profile.mode == ProfileMode::Local {
+        return if vmi.account.is_empty() {
+            Ok(vmi)
+        } else {
+            Err("Local VMI profiles do not use a VMI account.".into())
+        };
+    }
     let mut bytes = vmi.account.bytes();
     if vmi.account.len() > 32
         || !bytes.next().is_some_and(|byte| byte.is_ascii_lowercase())
@@ -111,22 +126,28 @@ fn valid_token(token: &str) -> bool {
 async fn request(
     port: u16,
     path: &str,
-    content_type: &str,
-    payload: String,
+    payload: Option<(&str, String)>,
     cookie: Option<&str>,
 ) -> Result<(StatusCode, HeaderMap), String> {
     tokio::time::timeout(Duration::from_secs(50), async {
         let tcp = TcpStream::connect(("127.0.0.1", port))
             .await
-            .map_err(|_| "Could not reach VMI through the tunnel.")?;
+            .map_err(|_| "Could not reach VMI on the selected port.")?;
         let (mut sender, connection) = http1::handshake(TokioIo::new(tcp))
             .await
             .map_err(|_| "Could not open the VMI connection.")?;
         let connection = tokio::spawn(connection);
-        let mut builder = Request::post(path)
+        let builder = Request::builder()
+            .uri(path)
             .header("host", format!("127.0.0.1:{port}"))
-            .header("content-type", content_type)
             .header("connection", "close");
+        let (mut builder, payload) = match payload {
+            Some((content_type, body)) => (
+                builder.method("POST").header("content-type", content_type),
+                body,
+            ),
+            None => (builder.method("HEAD"), String::new()),
+        };
         if let Some(cookie) = cookie {
             builder = builder.header("cookie", cookie);
         }
@@ -176,6 +197,9 @@ pub async fn save(
     Json(mut data): Json<SaveRequest>,
 ) -> Result<Json<ProfileStore>, ApiError> {
     if let Some(password) = data.vmi_password.filter(|value| !value.is_empty()) {
+        if data.profile.mode != ProfileMode::Ssh {
+            return Err(ApiError("A local profile needs no VMI password.".into()));
+        }
         let vmi = vmi_profile(&data.profile).map_err(ApiError)?;
         if password.chars().count() > 1024 || password.contains('\0') {
             return Err(ApiError("Enter a valid VMI account password.".into()));
@@ -203,6 +227,9 @@ pub async fn open(
     State(state): State<SharedState>,
     Json(profile): Json<Profile>,
 ) -> Result<impl IntoResponse, ApiError> {
+    if profile.mode != ProfileMode::Ssh {
+        return Err(ApiError("Use Open VMI for a local profile.".into()));
+    }
     let vmi = vmi_profile(&profile).map_err(ApiError)?;
     let _connection = state.connection.lock().await;
     let port = active_port(&state, &profile).map_err(ApiError)?;
@@ -218,8 +245,7 @@ pub async fn open(
     let (status, headers) = request(
         port,
         "/login",
-        "application/x-www-form-urlencoded",
-        form,
+        Some(("application/x-www-form-urlencoded", form)),
         None,
     )
     .await
@@ -244,32 +270,15 @@ pub async fn open(
     }
     let session = session_cookie(&headers)
         .ok_or_else(|| ApiError("The VMI server did not return a valid session cookie.".into()))?;
-    let mut warning: Option<String> = None;
-    let agent = if let Some(settings) = &vmi.agent {
-        match secrets::load(&key_id("model", &profile, vmi, &settings.base_url)) {
-            Ok(Some(key)) => Some(json!({
-                "base_url": settings.base_url, "api": settings.api, "model": settings.model,
-                "additional_models": settings.additional_models, "image_models": settings.image_models,
-                "api_key": key,
-            })),
-            Ok(None) => {
-                warning = Some("No API key saved for this model endpoint. VMI was opened without starting Agent.".into());
-                None
-            }
-            Err(_) => {
-                warning = Some("VMI signed in. The saved model API key could not be read.".into());
-                None
-            }
-        }
-    } else {
-        None
+    let (agent, mut warning) = match model_payload(&profile, vmi) {
+        Ok(agent) => (agent, None),
+        Err(message) => (None, Some(message)),
     };
     if let Some(agent) = agent {
         warning = match request(
             port,
             "/api/agent/session",
-            "application/json",
-            agent.to_string(),
+            Some(("application/json", agent.to_string())),
             Some(session),
         )
         .await
@@ -294,6 +303,62 @@ pub async fn open(
         ],
         Json(warning),
     ))
+}
+
+fn model_payload(profile: &Profile, vmi: &VmiProfile) -> Result<Option<Value>, String> {
+    let Some(agent) = &vmi.agent else {
+        return Ok(None);
+    };
+    let key = secrets::load(&key_id("model", profile, vmi, &agent.base_url))
+        .map_err(|_| "Could not read the model API key from the OS keychain.")?
+        .ok_or("Save the model API key for this endpoint in the client profile first.")?;
+    Ok(Some(json!({
+        "base_url": agent.base_url, "api": agent.api, "model": agent.model,
+        "additional_models": agent.additional_models, "image_models": agent.image_models,
+        "api_key": key,
+    })))
+}
+
+async fn check_local_desktop(port: u16) -> Result<(), String> {
+    let (status, headers) = request(port, LOCAL_CLIENT_PATH, None, None).await?;
+    if status != StatusCode::NO_CONTENT
+        || headers
+            .get("x-vmi-local-client")
+            .and_then(|header| header.to_str().ok())
+            != Some("1")
+    {
+        return Err("This port does not provide VMI desktop access. Start the local GUI with VMI_GUI_LOCAL_CLIENT=1 and use its displayed port.".into());
+    }
+    Ok(())
+}
+
+pub async fn open_local(Json(profile): Json<Profile>) -> Result<Json<String>, ApiError> {
+    profile.validate().map_err(ApiError)?;
+    if profile.mode != ProfileMode::Local {
+        return Err(ApiError("Choose the local connection mode.".into()));
+    }
+    let port = profile.remote_port;
+    if profile.vmi.as_ref().is_some_and(|vmi| vmi.agent.is_some()) {
+        let vmi = vmi_profile(&profile).map_err(ApiError)?;
+        check_local_desktop(port).await.map_err(ApiError)?;
+        if let Some(agent) = model_payload(&profile, vmi).map_err(ApiError)? {
+            let (status, _) = request(
+                port,
+                LOCAL_CLIENT_PATH,
+                Some(("application/json", agent.to_string())),
+                None,
+            )
+            .await
+            .map_err(ApiError)?;
+            if status != StatusCode::OK {
+                return Err(ApiError(
+                    "VMI Agent could not start with the saved settings. Check the GUI diagnostics."
+                        .into(),
+                ));
+            }
+        }
+    }
+    Ok(Json(profile.local_url(port)))
 }
 
 #[cfg(test)]

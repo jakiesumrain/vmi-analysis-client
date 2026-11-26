@@ -1,6 +1,6 @@
 # Client / server contract
 
-Status: SSH tunnel launcher with optional saved VMI sign-in.
+Status: SSH tunnel launcher and direct local desktop connection.
 Protocol version: **1**
 
 This contract covers the VMI Analysis client
@@ -125,6 +125,21 @@ The local control panel receives the normal HttpOnly VMI session cookie and
 then opens the forwarded VMI page in that browser. The password and model API
 key stay out of browser navigation and GUI form fields. Both loopback
 listeners use the same browser hostname, so the cookie applies across ports.
+
+## Direct local connection
+
+A local profile opens an existing VMI GUI at `http://127.0.0.1:<port>`.
+The default port is 13517. This mode uses the browser and the GUI's
+single-user workspace. It requires neither SSH nor a VMI account.
+
+To start Agent using the client's saved model connection, launch the GUI
+with `VMI_GUI_LOCAL_CLIENT=1`. The GUI binds to `127.0.0.1` and exposes a
+desktop-only endpoint. The client first sends `HEAD /api/local-client`
+and requires status 204 with `X-VMI-Local-Client: 1`. It then sends the
+same JSON model connection as the shared startup endpoint to
+`POST /api/local-client`. The GUI checks the loopback peer and Host and
+accepts only direct, non-browser requests. The local model key is scoped
+to the local GUI port and provider URL in the OS keychain.
 
 ## Versioning and compatibility
 

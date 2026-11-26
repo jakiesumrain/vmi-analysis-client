@@ -81,6 +81,7 @@ mod tests {
     fn profile() -> Profile {
         Profile {
             name: "Lab".into(),
+            mode: crate::config::ProfileMode::Ssh,
             host: "vmi.example.org".into(),
             port: 2222,
             user: "alice".into(),

@@ -1,8 +1,7 @@
 # VMI Analysis Client
 
-Open an SSH tunnel to a shared VMI Analysis server and use the web UI in
-your browser. The client keeps the tunnel alive and can sign in and start
-Agent from a saved profile. [VMI Analysis server](https://github.com/jakiesumrain/vmi-analysis-gui)
+Open a local VMI Analysis GUI or connect to a shared server over SSH.
+The client can start Agent from a saved model connection. [VMI Analysis server](https://github.com/jakiesumrain/vmi-analysis-gui)
 
 ## Run on Windows
 
@@ -18,7 +17,23 @@ The client opens its control panel in your default browser. Use the Windows
 tray icon to reopen the panel, reconnect, disconnect, or quit. Closing the
 browser tab leaves the tunnel running.
 
-## Connect
+## Use VMI on this computer
+
+Choose **Local (this computer)** and enter the port shown by the running
+VMI GUI. Choose **Open VMI** to open it in your browser.
+
+To start Agent with a saved key, launch the GUI from its checkout:
+
+```powershell
+$env:VMI_GUI_LOCAL_CLIENT = '1'
+uv run vmi-analysis
+```
+
+In the client, open **Agent connection**, enter your model settings and key,
+and choose **Save profile**. Then choose **Open VMI**. The key goes in the
+OS keychain.
+
+## Connect over SSH
 
 1. Enter the SSH host and username. Choose password or key-file authentication.
 2. Choose **Connect**. Sign in with your VMI account when the web UI opens.

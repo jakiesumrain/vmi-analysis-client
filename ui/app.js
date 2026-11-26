@@ -12,6 +12,15 @@ const el = (id) => document.getElementById(id);
 const ui = {
   form: el("connection-form"),
   name: el("name"),
+  mode: el("connection-mode"),
+  localVmi: el("local-vmi-port"),
+  localVmiField: el("local-vmi-field"),
+  sshFields: el("ssh-fields"),
+  sshOptions: el("ssh-options"),
+  vmiSettingsLabel: el("vmi-settings-label"),
+  tunnelState: el("tunnel-state"),
+  localState: el("local-state"),
+  statusHeading: el("status-heading"),
   host: el("host"),
   port: el("port"),
   user: el("user"),
@@ -57,6 +66,11 @@ let profiles = [];
 let status = { state: "disconnected", message: "Not connected.", url: null };
 let autoOpenedUrl = null;
 let connectedProfile = null;
+let openingLocal = false;
+
+const isLocal = () => ui.mode.value === "local";
+const profileName = (profile) => profile.name || (profile.mode === "local"
+  ? `Local VMI (${profile.remote_port})` : `${profile.user}@${profile.host}`);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -85,6 +99,11 @@ function showError(message) {
 }
 
 function setBusy(busy) {
+  if (isLocal()) {
+    ui.connect.disabled = openingLocal;
+    ui.connect.textContent = openingLocal ? "Opening…" : "Open VMI";
+    return;
+  }
   ui.connect.disabled =
     busy ||
     status.state === "connected" ||
@@ -133,17 +152,19 @@ function applyStatus(next) {
   setBusy(false);
 
   if (state === "disconnected" || state === "failed") autoOpenedUrl = null;
-  if (connected && status.url && ui.autoOpen.checked && autoOpenedUrl !== status.url) {
+  if (!isLocal() && connected && status.url && ui.autoOpen.checked && autoOpenedUrl !== status.url) {
     autoOpenedUrl = status.url;
     void openTunnel();
   }
-  if (state === "failed") {
+  if (!isLocal() && state === "failed") {
     showError(status.message);
   }
 }
 
 function fillForm(profile) {
   ui.name.value = profile.name || "";
+  ui.mode.value = profile.mode || "ssh";
+  ui.localVmi.value = profile.mode === "local" ? profile.remote_port || 13517 : 13517;
   ui.host.value = profile.host || "";
   ui.port.value = profile.port || 22;
   ui.user.value = profile.user || "";
@@ -164,9 +185,24 @@ function fillForm(profile) {
   ui.vmiApi.value = vmi?.agent?.api || "openai-completions";
   ui.vmiModels.value = vmi?.agent ? [vmi.agent.model, ...vmi.agent.additional_models].join(", ") : "";
   ui.vmiImages.value = vmi?.agent?.image_models.join(", ") || "";
-  setBusy(false);
+  syncModeFields();
   syncAuthFields();
   showError("");
+}
+
+function syncModeFields() {
+  const local = isLocal();
+  ui.sshFields.hidden = ui.sshFields.disabled = local;
+  ui.sshOptions.hidden = local;
+  for (const input of ui.sshOptions.querySelectorAll("input")) input.disabled = local;
+  for (const field of document.querySelectorAll("[data-ssh-only]")) field.hidden = local;
+  ui.localVmiField.hidden = !local;
+  ui.localVmi.disabled = !local;
+  ui.vmiSettingsLabel.textContent = local ? "Agent connection" : "VMI account and Agent";
+  ui.pill.hidden = ui.tunnelState.hidden = ui.disconnect.hidden = local;
+  ui.localState.hidden = !local;
+  ui.statusHeading.textContent = local ? "Local VMI" : "Tunnel";
+  setBusy(false);
 }
 
 function syncAuthFields() {
@@ -183,6 +219,21 @@ function readForm() {
   const [model, ...additionalModels] = list(ui.vmiModels);
   const account = ui.vmiAccount.value.trim();
   const base = ui.vmiBase.value.trim();
+  const agent = base && model ? {
+    base_url: base,
+    api: ui.vmiApi.value,
+    model,
+    additional_models: additionalModels,
+    image_models: list(ui.vmiImages),
+  } : null;
+  if (isLocal()) {
+    return {
+      mode: "local",
+      name: ui.name.value.trim(),
+      remote_port: Number(ui.localVmi.value),
+      vmi: agent ? { agent } : null,
+    };
+  }
   return {
     name: ui.name.value.trim(),
     host: ui.host.value.trim(),
@@ -196,16 +247,7 @@ function readForm() {
     local_port: localPortText ? Number(localPortText) : 0,
     remember_password: ui.remember.checked,
     remember_passphrase: ui.remember.checked,
-    vmi: account ? {
-      account,
-      agent: base && model ? {
-        base_url: base,
-        api: ui.vmiApi.value,
-        model,
-        additional_models: additionalModels,
-        image_models: list(ui.vmiImages),
-      } : null,
-    } : null,
+    vmi: account ? { account, agent } : null,
   };
 }
 
@@ -215,7 +257,7 @@ function refreshProfiles(store) {
   ui.profileSelect.replaceChildren();
   ui.profileSelect.append(new Option("New profile", ""));
   for (const profile of profiles) {
-    const label = profile.name || `${profile.user}@${profile.host}`;
+    const label = profileName(profile);
     ui.profileSelect.append(new Option(label, label));
   }
   if (profiles.some((profile) => (profile.name || "") === selected)) {
@@ -235,6 +277,21 @@ async function submit(event) {
   }
   showError("");
   const profile = readForm();
+  if (isLocal()) {
+    if (openingLocal) return;
+    openingLocal = true;
+    setBusy(true);
+    try {
+      const url = await api("/api/desktop/open-local", { method: "POST", body: JSON.stringify(profile) });
+      window.location.assign(url);
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      openingLocal = false;
+      setBusy(false);
+    }
+    return;
+  }
   connectedProfile = profile;
   autoOpenedUrl = null;
   const keyMode = ui.authKind.value === "key_file";
@@ -268,13 +325,13 @@ async function saveProfile() {
     const profile = readForm();
     const store = await api("/api/desktop/save", {
       method: "POST",
-      body: JSON.stringify({ profile, vmi_password: ui.vmiPassword.value, api_key: ui.vmiKey.value }),
+      body: JSON.stringify({ profile, vmi_password: isLocal() ? null : ui.vmiPassword.value, api_key: ui.vmiKey.value }),
     });
     ui.vmiKey.value = "";
     ui.vmiPassword.value = "";
-    if (connectedProfile) connectedProfile = profile;
+    if (connectedProfile && !isLocal()) connectedProfile = profile;
     refreshProfiles(store);
-    ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
+    ui.profileSelect.value = profileName(profile);
     ui.remove.disabled = false;
     logLine("info", "Profile saved.");
   } catch (err) {
@@ -404,6 +461,10 @@ async function init() {
 
   ui.form.addEventListener("submit", submit);
   ui.authKind.addEventListener("change", syncAuthFields);
+  ui.mode.addEventListener("change", () => {
+    showError("");
+    syncModeFields();
+  });
   ui.save.addEventListener("click", saveProfile);
   ui.remove.addEventListener("click", deleteProfile);
   ui.disconnect.addEventListener("click", disconnect);

@@ -28,6 +28,7 @@ pub fn router(state: SharedState) -> Router {
     let desktop = Router::new()
         .route("/save", post(crate::desktop::save))
         .route("/open", post(crate::desktop::open))
+        .route("/open-local", post(crate::desktop::open_local))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             require_bearer,
@@ -199,6 +200,9 @@ async fn connect(
     Json(request): Json<ConnectRequest>,
 ) -> Result<Json<ConnectInfo>, ApiError> {
     request.profile.validate().map_err(ApiError)?;
+    if request.profile.mode != crate::config::ProfileMode::Ssh {
+        return Err(ApiError("Use Open VMI for a local profile.".into()));
+    }
     let auth =
         resolve_auth(&request.profile, request.password, request.passphrase).map_err(ApiError)?;
     start_session(state, request.profile, auth)
