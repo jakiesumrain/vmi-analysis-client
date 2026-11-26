@@ -25,6 +25,14 @@ const STYLE_CSS: &str = include_str!("../../ui/style.css");
 const APP_JS: &str = include_str!("../../ui/app.js");
 
 pub fn router(state: SharedState) -> Router {
+    let desktop = Router::new()
+        .route("/pair", post(crate::desktop::pair))
+        .route("/save", post(crate::desktop::save))
+        .route("/open", post(crate::desktop::open))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ));
     let api = Router::new()
         .route("/ping", get(ping))
         .route("/status", get(status))
@@ -37,6 +45,7 @@ pub fn router(state: SharedState) -> Router {
         .route("/pick-key", post(pick_key))
         .route("/open", post(open_url))
         .route("/quit", post(quit))
+        .nest("/desktop", desktop)
         .layer(middleware::from_fn_with_state(state.clone(), require_token));
 
     Router::new()
@@ -94,6 +103,18 @@ async fn require_token(State(state): State<SharedState>, request: Request, next:
     }
 }
 
+async fn require_bearer(
+    State(state): State<SharedState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if authorized(&state, request.headers(), None) {
+        next.run(request).await
+    } else {
+        (StatusCode::UNAUTHORIZED, "Unauthorized").into_response()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Static panel
 // ---------------------------------------------------------------------------
@@ -120,7 +141,7 @@ async fn script() -> impl IntoResponse {
 // API
 // ---------------------------------------------------------------------------
 
-struct ApiError(String);
+pub(crate) struct ApiError(pub(crate) String);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
@@ -144,15 +165,9 @@ async fn save_profile(
     State(state): State<SharedState>,
     Json(mut profile): Json<Profile>,
 ) -> Result<Json<ProfileStore>, ApiError> {
-    profile.name = profile.display_name();
-    profile.validate().map_err(ApiError)?;
-    let mut store = state
-        .store
-        .lock()
-        .map_err(|_| ApiError("Internal state lock failed.".into()))?;
-    store.upsert(profile);
-    store.save(&state.profiles_path).map_err(ApiError)?;
-    Ok(Json(store.clone()))
+    crate::desktop::save_profile(&state, &mut profile)
+        .map(Json)
+        .map_err(ApiError)
 }
 
 async fn delete_profile(

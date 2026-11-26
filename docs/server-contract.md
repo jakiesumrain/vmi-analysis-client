@@ -1,6 +1,6 @@
 # Client / server contract
 
-Status: **Phase 1 draft** — SSH tunnel launcher only.
+Status: SSH tunnel launcher with optional desktop account linking.
 Protocol version: **1**
 
 This contract covers the VMI Analysis client
@@ -92,9 +92,9 @@ The server account should be restricted to the forwarding needed for VMI:
 
 The client must not request a remote shell, a PTY, or remote forwarding.
 
-## Phase 1: no server API
+## Browser-only connection
 
-There is no custom API between the client and the server. The contract is:
+The GUI works through a plain SSH forward with ordinary browser sign-in:
 
 ```text
 SSH local forward + existing NiceGUI web application + browser
@@ -106,7 +106,28 @@ plumbing, not part of the client/server contract, and must never be exposed on
 a network interface.
 
 The client must not scrape the GUI, inject credentials into the page, or
-require server-side code changes.
+require desktop sign-in for regular tunneling.
+
+## Optional desktop sign-in
+
+Users sign in normally once and generate a five-minute code under **Settings →
+Desktop client**. The client exchanges the one-use code and account name
+at `POST /client/v1/pair` through the active SSH tunnel. The server stores a
+hash of the new device credential. Linking again replaces the previous link.
+Use **Revoke access** in VMI Settings to invalidate the credential and pending
+launch tickets.
+
+The client saves the device credential and model API key to the OS keychain,
+scoped to the saved server and account. It scopes the model key to the exact
+provider URL. Connection preferences and model IDs live in the profile.
+
+`POST /client/v1/launch` accepts the device credential as a bearer token and
+the account and optional Agent settings in a JSON body. The server can reuse
+the account's active Agent or start one with its usual session-only key handling.
+The response contains a one-use, 60-second sign-in ticket. The client opens
+`/client/v1/open` with the ticket and account in the fragment. The page removes
+the fragment, posts the ticket to `/client/v1/consume`, and receives the normal
+VMI session cookie. A browser signed into another account must sign out first.
 
 ## Versioning and compatibility
 

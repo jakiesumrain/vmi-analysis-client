@@ -6,6 +6,7 @@
 //! tunnel. Nothing is rendered with an embedded webview.
 
 mod config;
+mod desktop;
 mod diag;
 mod secrets;
 mod server;

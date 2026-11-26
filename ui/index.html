@@ -90,6 +90,30 @@
           </div>
 
           <details class="advanced">
+            <summary>VMI account and Agent</summary>
+            <p class="hint">Connect and sign in to VMI once. In VMI Settings, generate a desktop link code and paste it here.</p>
+            <div class="grid">
+              <label class="field span-2"><span>VMI account</span><input id="vmi-account" maxlength="32" autocomplete="off" /></label>
+              <label class="field span-2"><span>Link code</span><input id="vmi-code" type="password" maxlength="43" autocomplete="off" /></label>
+              <div class="actions span-2">
+                <button type="button" id="vmi-link" class="button" disabled>Link VMI account</button>
+              </div>
+              <label class="field span-2"><span>Model endpoint</span><input id="vmi-base-url" type="url" placeholder="https://api.deepseek.com/v1" /></label>
+              <label class="field span-2"><span>API format</span>
+                <select id="vmi-api">
+                  <option value="openai-completions">OpenAI compatible</option>
+                  <option value="openai-responses">OpenAI Responses</option>
+                  <option value="anthropic-messages">Anthropic Messages</option>
+                </select>
+              </label>
+              <label class="field span-2"><span>Model IDs (first is default)</span><input id="vmi-models" placeholder="model-id, another-model-id" /></label>
+              <label class="field span-2"><span>Image-capable model IDs</span><input id="vmi-image-models" /></label>
+              <label class="field span-2"><span>Model API key</span><input id="vmi-api-key" type="password" autocomplete="off" /></label>
+            </div>
+            <p class="hint">Save profile to keep the Agent settings and store a supplied key in the OS keychain.</p>
+          </details>
+
+          <details class="advanced">
             <summary>Advanced</summary>
             <div class="grid">
               <label class="field">

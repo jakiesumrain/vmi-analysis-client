@@ -62,6 +62,19 @@ required by every API call.
 Use **Save profile** to keep the connection settings. Passwords are stored only
 when **Remember** is checked, and then only in the OS keychain.
 
+### Remember a VMI account and Agent settings
+
+On a server with desktop sign-in enabled, connect the tunnel and sign in normally
+once. In **VMI Settings → Desktop client**, generate a link code. In the client,
+open **VMI account and Agent**, enter your VMI account name and the code, then
+choose **Link VMI account**. Enter model settings and an API key if you want the
+client to start the Agent, then choose **Save profile**.
+
+On later launches, select the profile and connect. The client opens the GUI in
+your normal browser and signs in using the linked account. The VMI account
+link credential and any model API key live in the OS keychain. You can revoke
+the account link from VMI Settings.
+
 ## Files
 
 Everything lives in the application-config directory, for example

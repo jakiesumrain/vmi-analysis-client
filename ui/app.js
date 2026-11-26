@@ -44,11 +44,20 @@ const ui = {
   clearLog: el("clear-log"),
   version: el("version"),
   service: el("service-note"),
+  vmiAccount: el("vmi-account"),
+  vmiCode: el("vmi-code"),
+  vmiLink: el("vmi-link"),
+  vmiBase: el("vmi-base-url"),
+  vmiApi: el("vmi-api"),
+  vmiModels: el("vmi-models"),
+  vmiImages: el("vmi-image-models"),
+  vmiKey: el("vmi-api-key"),
 };
 
 let profiles = [];
 let status = { state: "disconnected", message: "Not connected.", url: null };
 let autoOpenedUrl = null;
+let connectedProfile = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -82,7 +91,9 @@ function setBusy(busy) {
     status.state === "connected" ||
     status.state === "connecting" ||
     status.state === "reconnecting";
-  ui.connect.textContent = busy ? "Connecting…" : "Connect";
+  ui.connect.textContent = busy
+    ? "Connecting…"
+    : ui.vmiAccount.value.trim() ? "Connect and open VMI" : "Connect";
 }
 
 function logLine(level, message) {
@@ -120,14 +131,13 @@ function applyStatus(next) {
   ui.copy.disabled = !status.url;
   ui.disconnect.disabled = !(connected || busyState);
   ui.connect.disabled = connected || busyState;
-  ui.connect.textContent = "Connect";
+  ui.vmiLink.disabled = !connected;
+  setBusy(false);
 
+  if (state === "disconnected" || state === "failed") autoOpenedUrl = null;
   if (connected && status.url && ui.autoOpen.checked && autoOpenedUrl !== status.url) {
     autoOpenedUrl = status.url;
-    api("/api/open", {
-      method: "POST",
-      body: JSON.stringify({ url: status.url }),
-    }).catch((err) => logLine("error", err.message));
+    void openTunnel();
   }
   if (state === "failed") {
     showError(status.message);
@@ -148,6 +158,15 @@ function fillForm(profile) {
   ui.remember.checked = Boolean(profile.remember_password || profile.remember_passphrase);
   ui.password.value = "";
   ui.passphrase.value = "";
+  const vmi = profile.vmi;
+  ui.vmiAccount.value = vmi?.account || "";
+  ui.vmiCode.value = "";
+  ui.vmiKey.value = "";
+  ui.vmiBase.value = vmi?.agent?.base_url || "";
+  ui.vmiApi.value = vmi?.agent?.api || "openai-completions";
+  ui.vmiModels.value = vmi?.agent ? [vmi.agent.model, ...vmi.agent.additional_models].join(", ") : "";
+  ui.vmiImages.value = vmi?.agent?.image_models.join(", ") || "";
+  setBusy(false);
   syncAuthFields();
   showError("");
 }
@@ -162,6 +181,10 @@ function syncAuthFields() {
 function readForm() {
   const keyMode = ui.authKind.value === "key_file";
   const localPortText = ui.localPort.value.trim();
+  const list = (field) => [...new Set(field.value.split(",").map((name) => name.trim()).filter(Boolean))];
+  const [model, ...additionalModels] = list(ui.vmiModels);
+  const account = ui.vmiAccount.value.trim();
+  const base = ui.vmiBase.value.trim();
   return {
     name: ui.name.value.trim(),
     host: ui.host.value.trim(),
@@ -175,6 +198,16 @@ function readForm() {
     local_port: localPortText ? Number(localPortText) : 0,
     remember_password: ui.remember.checked,
     remember_passphrase: ui.remember.checked,
+    vmi: account ? {
+      account,
+      agent: base && model ? {
+        base_url: base,
+        api: ui.vmiApi.value,
+        model,
+        additional_models: additionalModels,
+        image_models: list(ui.vmiImages),
+      } : null,
+    } : null,
   };
 }
 
@@ -204,6 +237,8 @@ async function submit(event) {
   }
   showError("");
   const profile = readForm();
+  connectedProfile = profile;
+  autoOpenedUrl = null;
   const keyMode = ui.authKind.value === "key_file";
   setBusy(true);
   try {
@@ -217,7 +252,9 @@ async function submit(event) {
     });
     ui.password.value = "";
     ui.passphrase.value = "";
-    applyStatus({ state: "connecting", message: "Connecting…", url: info.url });
+    if (status.state !== "connected" || status.url !== info.url) {
+      applyStatus({ state: "connecting", message: "Connecting…", url: info.url });
+    }
     logLine("info", `Tunnel requested at ${info.url}`);
   } catch (err) {
     showError(err.message);
@@ -231,10 +268,12 @@ async function saveProfile() {
   showError("");
   try {
     const profile = readForm();
-    const store = await api("/api/profiles", {
+    const store = await api("/api/desktop/save", {
       method: "POST",
-      body: JSON.stringify(profile),
+      body: JSON.stringify({ profile, api_key: ui.vmiKey.value }),
     });
+    ui.vmiKey.value = "";
+    if (connectedProfile) connectedProfile = profile;
     refreshProfiles(store);
     ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
     ui.remove.disabled = false;
@@ -276,9 +315,40 @@ async function openTunnel() {
     return;
   }
   try {
+    const profile = connectedProfile || readForm();
+    if (profile.vmi) {
+      try {
+        const warning = await api("/api/desktop/open", { method: "POST", body: JSON.stringify(profile) });
+        if (warning) logLine("warn", warning);
+        return;
+      } catch (err) {
+        showError(err.message);
+      }
+    }
     await api("/api/open", { method: "POST", body: JSON.stringify({ url: status.url }) });
   } catch (err) {
     logLine("error", err.message);
+  }
+}
+
+async function pairVmi() {
+  showError("");
+  ui.vmiLink.disabled = true;
+  try {
+    const profile = readForm();
+    const store = await api("/api/desktop/pair", {
+      method: "POST",
+      body: JSON.stringify({ profile, code: ui.vmiCode.value.trim() }),
+    });
+    ui.vmiCode.value = "";
+    connectedProfile = profile;
+    refreshProfiles(store);
+    ui.profileSelect.value = profile.name || `${profile.user}@${profile.host}`;
+    logLine("info", "VMI account linked.");
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    ui.vmiLink.disabled = status.state !== "connected";
   }
 }
 
@@ -359,6 +429,8 @@ async function init() {
   ui.remove.addEventListener("click", deleteProfile);
   ui.disconnect.addEventListener("click", disconnect);
   ui.open.addEventListener("click", openTunnel);
+  ui.vmiLink.addEventListener("click", pairVmi);
+  ui.vmiAccount.addEventListener("input", () => setBusy(false));
   ui.copy.addEventListener("click", copyUrl);
   ui.quit.addEventListener("click", quitClient);
   el("browse-key").addEventListener("click", browseKey);
