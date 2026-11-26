@@ -45,10 +45,13 @@ The client must:
 
 - choose a free loopback port, or honour an explicitly configured one;
 - fail clearly if the remote forward cannot be established;
+- confirm that SSH can open a channel to the server's web endpoint before
+  reporting a connected tunnel, including after reconnect;
 - verify the SSH host key;
 - keep the tunnel alive with SSH keepalives;
 - reconnect after network loss or machine sleep;
 - close only its own forward and local listener on disconnect.
+  Manual reconnect waits for that listener to close before binding its port again.
 
 Equivalent manual command for reference:
 
@@ -75,7 +78,9 @@ The client should support:
 - SSH agent and key-file authentication first;
 - password fallback through the OS keychain, not plaintext storage;
 - SSH host-key verification against a known-hosts store;
-- explicit handling of a changed host key: warn and refuse automatically.
+- explicit handling of changed keys and unreadable trust records: refuse the
+  connection before authentication, including a different key algorithm for
+  a previously recorded host.
 
 ## Required SSH server policy
 
@@ -87,13 +92,18 @@ The server account should be restricted to the forwarding needed for VMI:
 
 The client must not request a remote shell, a PTY, or remote forwarding.
 
-## Phase 1: no HTTP API
+## Phase 1: no server API
 
-There is no custom client HTTP API in Phase 1. The contract is:
+There is no custom API between the client and the server. The contract is:
 
 ```text
 SSH local forward + existing NiceGUI web application + browser
 ```
+
+The client's own control panel is a loopback-only HTTP service on `127.0.0.1`
+(`/api/*`, authorized by a token generated for each run). It is local process
+plumbing, not part of the client/server contract, and must never be exposed on
+a network interface.
 
 The client must not scrape the GUI, inject credentials into the page, or
 require server-side code changes.

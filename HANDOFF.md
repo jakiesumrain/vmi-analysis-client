@@ -13,30 +13,55 @@ Shared-server docs: `../vmi-analysis-gui/docs/shared-server.md`
 ## Why this repo exists
 
 The current shared-server workflow requires each user to start an SSH local
-forward manually before opening the browser. This companion app will bundle
-that into one desktop application:
+forward manually before opening the browser. This companion app bundles that
+into one process:
 
 ```text
-Tauri/Rust client
+VMI Analysis Client (local service)
   -> SSH connection to the server
   -> local forward 127.0.0.1:<local> -> server 127.0.0.1:13517
-  -> system browser at the forwarded URL
+  -> opens the VMI page in the system browser
 ```
 
 It is a separate repository (<https://github.com/jakiesumrain/vmi-analysis-client>)
-so the Rust/Tauri toolchain, release signing and installers do not enter the
-Python server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
+so the Rust toolchain, release signing and installers do not enter the Python
+server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
+
+## Architecture decision: local service plus browser panel
+
+The first implementation used a Tauri window for the client's own form. On the
+owner's machine that window could not start: WebView2 environment creation
+failed with `E_UNEXPECTED` (`0x8000FFFF`). A bare Tauri hello-world app failed
+the same way, so it was not application code. The installed WebView2 Runtime was
+129.0.2792.65 (September 2024) while the Edge updater service `edgeupdate` is
+set to **Disabled**, so the runtime has not been updated.
+
+Rather than depend on that runtime at all, the client is now:
+
+- a local Rust process that owns the SSH tunnel;
+- a small HTTP panel on `127.0.0.1`, opened in the system browser;
+- a per-run bearer token that authorizes every API call.
+
+This also matches the original rule that the VMI application is never embedded
+in a webview: now nothing is embedded, and Chrome/Edge/Firefox render the panel.
+No WebView2 is required. The VMI page still opens in the same browser through
+the tunnel.
 
 ## Current client decisions
 
-- **Tauri 2 + Rust.**
-- **SSH:** `russh`; do not shell out to OpenSSH in the first version.
-- **Scope:** system browser, not an embedded webview.
-- **Tray:** connected/reconnect/open/disconnect, with tunnel status.
-- **Credentials:** OS keychain; SSH agent/key first, password fallback.
-- **Host keys:** verify and persist known hosts; refuse automatic changed-key
-  acceptance.
-- **Phase 1:** tunnel only. No provider/model traffic from the client.
+- **Rust only**; no Tauri, no WebView2, no embedded browser.
+- **Panel:** static HTML/CSS/JS served by the client; JSON API plus server-sent
+  events for status and activity.
+- **Security:** binds `127.0.0.1` only; constant-time token check; the static
+  panel contains no secrets.
+- **SSH:** `russh`; no shelling out to OpenSSH.
+- **Credentials:** OS keychain; key file and password (no agent yet).
+- **Host keys:** verify and persist; refuse a changed key.
+- **Reconnect:** bounded automatic retries; manual connect from the panel.
+- **Single instance:** `session.json` records port and token; launching the
+  client again reopens the panel instead of starting a second tunnel.
+- **Tray:** a native Windows notify icon (no WebView2) with open panel,
+  reconnect, disconnect and quit; the tooltip follows the tunnel state.
 
 ## Current server decisions that constrain the client
 
@@ -45,29 +70,62 @@ Python server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
 - Users need two identities: an SSH account for the tunnel and a VMI account
   for the web login.
 - The Agent runs on the server (or in a server-started Docker/Podman
-  container). Its provider API traffic is server-side by default; the API key
-  is passed only through the child environment and is redacted/cleared by the
-  server.
-- Do **not** use a browser `fetch()` relay for provider traffic: CORS,
-  streaming, browser lifetime and provider rules make it fragile.
-- Client-side Agent egress is a possible Phase 2 feature. It requires a
-  server-side authenticated relay and container networking work; it is not part
-  of this client's MVP.
+  container). Its provider API traffic is server-side by default.
+- Do **not** use a browser `fetch()` relay for provider traffic.
+- Client-side Agent egress is a possible Phase 2 feature and needs a
+  server-side relay; it is not part of this client.
+
+## Implementation status (Phase 1)
+
+Implemented:
+
+- Rust client process with a loopback panel, JSON API and SSE updates.
+- SSH connection with password and key-file authentication.
+- Host keys recorded on first contact and refused when they change.
+- Local listener with automatic port choice, direct-tcpip forwarding,
+  keepalive and bounded reconnect.
+- Keychain storage for passwords and key passphrases.
+- Profiles, single-instance reopen, panel **Quit client**.
+- Native Windows tray icon with open/reconnect/disconnect/quit and a state
+  tooltip; the icon is embedded in the binary (`client/assets/vmi.ico`).
+
+Verified:
+
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`.
+- `cargo test`: 18 tests, including an end-to-end test that starts an
+  in-process SSH server, connects with the production client code, forwards
+  bytes to an echo server, and checks host-key trust, changed-key refusal and
+  bad credentials.
+- The panel was rendered in headless Chrome against a running client: saved
+  profile selected, fields populated, key fields hidden in password mode,
+  unauthorized API calls rejected with 401, profile saved to disk, and the
+  connect failure path reporting through `/api/status`.
+
+Not verified here: the tray icon. `--diagnose` reports session 1,
+`WinSta0\Default`, and Explorer's tray window found, yet `Shell_NotifyIcon`
+still returns access denied (error 5) and no icon appears. The window class and
+window are created. The same environment refuses writes to `%APPDATA%` and
+`%TEMP%` for unsigned executables while signed tools can write, which points at
+endpoint security or a restricted terminal rather than the tray code. Confirm
+the icon by launching the executable from Explorer.
+
+Because `%APPDATA%` is not writable here, the client now probes its data
+directories and uses the first writable one (default, beside the executable,
+temp), reporting the choice at startup.
 
 ## Open questions
 
-1. SSH key UX: key file, SSH agent, or both in the first release?
-2. Password auth: support via keychain, or defer?
-3. Windows and Linux packaging targets and signing approach.
-4. Whether to show a server/version handshake in the first release.
-5. If Phase 2 egress is required, define the relay protocol before writing
-   client code.
+1. SSH agent authentication in the first release?
+2. Windows signing and installer format; Linux packaging.
+3. Whether the panel should use HTTPS on loopback or keep HTTP plus token.
+4. Tray menus on Linux and macOS.
 
 ## Next steps
 
-1. Scaffold the Tauri 2 app and tray shell.
-2. Implement SSH auth, host-key verification and local forwarding.
-3. Add reconnect/keepalive and local-port conflict handling.
-4. Test against a local shared-server checkout using the manual command in
-   `docs/server-contract.md`.
-5. Add Windows and Linux installers after the tunnel MVP works.
+1. Run a real tunnel against a shared-server checkout and confirm the tray icon.
+2. Add SSH agent authentication.
+3. Add Windows signing and installers; test a Linux build.
+4. Update `docs/server-contract.md` before changing any tunnel or protocol
+   behavior.
+
+
