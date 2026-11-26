@@ -1,0 +1,48 @@
+[package]
+name = "vmi-analysis-client"
+version = "0.2.0"
+description = "Local launcher for the VMI Analysis server: SSH tunnel plus a browser UI"
+authors = ["Tao"]
+edition = "2021"
+rust-version = "1.90"
+
+[lib]
+name = "vmi_analysis_client_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vmi-analysis-client"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+getrandom = "0.3"
+open = "5"
+rfd = "0.17"
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "fs", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_StationsAndDesktops",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+
+
