@@ -3,6 +3,7 @@ name = "vmi-analysis-client"
 version = "0.2.0"
 description = "Local launcher for the VMI Analysis server: SSH tunnel plus a browser UI"
 authors = ["Tao"]
+license = "MIT"
 edition = "2021"
 rust-version = "1.90"
 
