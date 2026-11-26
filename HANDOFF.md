@@ -1,131 +1,50 @@
-# Handoff — VMI Analysis Client
+# Client implementation notes
 
-Date: 2026-11-21
+The VMI Analysis Client is a Rust process that manages an SSH tunnel and
+serves a local control panel. It binds both listeners to `127.0.0.1`. The
+browser renders the control panel and the VMI workbench. The original Tauri
+window was replaced after WebView2 startup failed on the test machine,
+including in a minimal Tauri app.
 
-| Repository | Location | URL |
-| --- | --- | --- |
-| Client (this one) | `.` | <https://github.com/jakiesumrain/vmi-analysis-client> |
-| Server | `../vmi-analysis-gui` | <https://github.com/jakiesumrain/vmi-analysis-gui> |
+The shared Linux server runs the Workbench and Agent. The client uses the
+regular VMI login and can request Agent startup through the authenticated
+session endpoint. Direct browser access through an SSH tunnel remains
+available. [Server contract](docs/server-contract.md)
 
-Server revision at handoff: `a4ffbf9` on `feature/agent-panel`
-Shared-server docs: `../vmi-analysis-gui/docs/shared-server.md`
+## Client data
 
-## Why this repo exists
+The application config directory on Windows is
+`%APPDATA%\com.vmi.analysis.client\`. Set `VMI_CLIENT_CONFIG_DIR` to choose
+another directory. When the default is unwritable, the client tries a
+`data` directory beside the executable, then a temporary directory.
+The startup log and `--diagnose` show the chosen location.
 
-The current shared-server workflow requires each user to start an SSH local
-forward manually before opening the browser. This companion app bundles that
-into one process:
+| File | Contents |
+| --- | --- |
+| `profiles.json` | SSH, VMI account, and Agent settings |
+| `known_hosts` | Recorded SSH host keys in OpenSSH format |
+| `session.json` | Current control-panel port and per-run token |
 
-```text
-VMI Analysis Client (local service)
-  -> SSH connection to the server
-  -> local forward 127.0.0.1:<local> -> server 127.0.0.1:13517
-  -> opens the VMI page in the system browser
-```
+The OS keychain stores saved SSH credentials, VMI passwords, and model API keys.
+The server receives the model key when starting the Agent and clears its session
+copies at shutdown.
 
-It is a separate repository (<https://github.com/jakiesumrain/vmi-analysis-client>)
-so the Rust toolchain, release signing and installers do not enter the Python
-server project (<https://github.com/jakiesumrain/vmi-analysis-gui>).
+## Verification
 
-## Architecture decision: local service plus browser panel
+- On Windows, the real client opened a running VMI server through an SSH
+  fixture. The browser loaded the Agent and Workbench, and reconnect reused
+  the same local port.
+- The Windows tray icon appeared in Explorer's overflow. Its **Disconnect**,
+  **Reconnect**, and **Quit client** actions worked on the interactive desktop.
+- After a client restart, the saved VMI password signed the browser in and the
+  saved model API key reached the Agent startup path. The test used a stub
+  for startup. Ordinary browser sign-in passed in the same test.
+- Rust tests cover SSH forwarding, changed host keys, authentication failure,
+  remote channel denial, and reconnect with an active forwarded connection.
 
-The first implementation used a Tauri window for the client's own form. On the
-owner's machine that window could not start: WebView2 environment creation
-failed with `E_UNEXPECTED` (`0x8000FFFF`). A bare Tauri hello-world app failed
-the same way, so it was not application code. The installed WebView2 Runtime was
-129.0.2792.65 (September 2024) while the Edge updater service `edgeupdate` is
-set to **Disabled**, so the runtime has not been updated.
+## Remaining work
 
-Rather than depend on that runtime at all, the client is now:
-
-- a local Rust process that owns the SSH tunnel;
-- a small HTTP panel on `127.0.0.1`, opened in the system browser;
-- a per-run bearer token that authorizes every API call.
-
-This also matches the original rule that the VMI application is never embedded
-in a webview: now nothing is embedded, and Chrome/Edge/Firefox render the panel.
-No WebView2 is required. The VMI page still opens in the same browser through
-the tunnel.
-
-## Current client decisions
-
-- **Rust only**; no Tauri, no WebView2, no embedded browser.
-- **Panel:** static HTML/CSS/JS served by the client; JSON API plus server-sent
-  events for status and activity.
-- **Security:** binds `127.0.0.1` only; constant-time token check; the static
-  panel contains no secrets.
-- **SSH:** `russh`; no shelling out to OpenSSH.
-- **Credentials:** OS keychain; key file and password (no agent yet).
-- **Host keys:** verify and persist; refuse a changed key.
-- **Reconnect:** bounded automatic retries; manual connect from the panel.
-- **Single instance:** `session.json` records port and token; launching the
-  client again reopens the panel instead of starting a second tunnel.
-- **Tray:** a native Windows notify icon (no WebView2) with open panel,
-  reconnect, disconnect and quit; the tooltip follows the tunnel state.
-
-## Current server decisions that constrain the client
-
-- The NiceGUI server listens on `127.0.0.1:13517`; the shared-server web port
-  must remain closed to incoming connections.
-- Users need two identities: an SSH account for the tunnel and a VMI account
-  for the web login.
-- The Agent runs on the server (or in a server-started Docker/Podman
-  container). Its provider API traffic is server-side by default.
-- Do **not** use a browser `fetch()` relay for provider traffic.
-- Client-side Agent egress is a possible Phase 2 feature and needs a
-  server-side relay; it is not part of this client.
-
-## Implementation status (Phase 1)
-
-Implemented:
-
-- Rust client process with a loopback panel, JSON API and SSE updates.
-- SSH connection with password and key-file authentication.
-- Host keys recorded on first contact and refused when they change.
-- Local listener with automatic port choice, direct-tcpip forwarding,
-  keepalive and bounded reconnect.
-- Keychain storage for passwords and key passphrases.
-- Profiles, single-instance reopen, panel **Quit client**.
-- Native Windows tray icon with open/reconnect/disconnect/quit and a state
-  tooltip; the icon is embedded in the binary (`client/assets/vmi.ico`).
-
-Verified:
-
-- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`.
-- `cargo test`: 18 tests, including an end-to-end test that starts an
-  in-process SSH server, connects with the production client code, forwards
-  bytes to an echo server, and checks host-key trust, changed-key refusal and
-  bad credentials.
-- The panel was rendered in headless Chrome against a running client: saved
-  profile selected, fields populated, key fields hidden in password mode,
-  unauthorized API calls rejected with 401, profile saved to disk, and the
-  connect failure path reporting through `/api/status`.
-
-Not verified here: the tray icon. `--diagnose` reports session 1,
-`WinSta0\Default`, and Explorer's tray window found, yet `Shell_NotifyIcon`
-still returns access denied (error 5) and no icon appears. The window class and
-window are created. The same environment refuses writes to `%APPDATA%` and
-`%TEMP%` for unsigned executables while signed tools can write, which points at
-endpoint security or a restricted terminal rather than the tray code. Confirm
-the icon by launching the executable from Explorer.
-
-Because `%APPDATA%` is not writable here, the client now probes its data
-directories and uses the first writable one (default, beside the executable,
-temp), reporting the choice at startup.
-
-## Open questions
-
-1. SSH agent authentication in the first release?
-2. Windows signing and installer format; Linux packaging.
-3. Whether the panel should use HTTPS on loopback or keep HTTP plus token.
-4. Tray menus on Linux and macOS.
-
-## Next steps
-
-1. Run a real tunnel against a shared-server checkout and confirm the tray icon.
-2. Add SSH agent authentication.
-3. Add Windows signing and installers; test a Linux build.
-4. Update `docs/server-contract.md` before changing any tunnel or protocol
-   behavior.
-
-
+- SSH agent authentication. The client currently offers password and key-file
+  authentication.
+- Verify Linux packaging and add trays for Linux and macOS.
+- Windows installer signing and automatic updates.
