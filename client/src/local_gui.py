@@ -31,7 +31,8 @@ def main():
     history_factory = getattr(shared, "agent_history", None)
     options = {"history": history_factory(None)} if history_factory else {}
     try:
-        AGENTS.start(request, shared_mode=False, **options)
+        connect = getattr(AGENTS, "connect_provider", None) or AGENTS.start
+        connect(request, shared_mode=False, **options)
     except (OSError, RuntimeError, ValueError):
         raise SystemExit(78) from None
     finally:

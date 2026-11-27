@@ -103,7 +103,7 @@ pub(crate) fn launch(
     while Instant::now() < deadline {
         match gui.child.try_wait() {
             Ok(Some(status)) if status.code() == Some(78) => {
-                return Err("Could not start the local Agent. Check the saved model settings and make sure Pi is installed.".into());
+                return Err("Could not set up the local Agent provider. Check the saved model settings.".into());
             }
             Ok(Some(_)) => return Err("VMI exited before opening the browser. Run uv run vmi-analysis in the checkout to see the error.".into()),
             Err(_) => break,

@@ -118,8 +118,9 @@ live in the profile.
 The client submits the saved account to VMI's normal `POST /login` over
 the active SSH tunnel. If the profile has model settings and a key, the
 client calls the authenticated `POST /api/agent/session` with that session.
-This endpoint starts the account's Agent, or returns success for an already
-active Agent. Manual-only servers refuse the Agent request.
+Current servers register the account's provider connection. The first
+message starts or resumes a chat. Older servers start Agent immediately.
+Manual-only servers refuse the Agent request.
 
 The local control panel receives the normal HttpOnly VMI session cookie and
 then opens the forwarded VMI page in that browser. The password and model API
@@ -136,14 +137,14 @@ mode requires no SSH connection or VMI account.
 The client scopes the saved model key to the checkout path and provider
 URL in the OS keychain. When starting the GUI, it supplies the connection
 to a client-owned startup script in the new Python process. The script
-consumes the credentials from the process environment and starts Agent
-through the checkout's existing Agent backend. No HTTP credentials, extra
-GUI endpoint, or source changes are required.
+consumes the credentials from the process environment and connects the
+provider through the checkout's Agent backend. The first message starts or
+resumes a chat. Older checkouts still start Agent at launch.
 
 ## Versioning and compatibility
 
-The client uses the existing browser login endpoint and requests Agent
-startup only when the profile includes model settings and a saved key.
+The client uses the existing browser login endpoint and connects the Agent
+provider only when the profile includes model settings and a saved key.
 If the server lacks the Agent endpoint or runs in manual-only mode, the
 client still opens the signed-in GUI.
 
