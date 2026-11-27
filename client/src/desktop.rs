@@ -297,10 +297,14 @@ pub async fn open(
             Ok((StatusCode::FORBIDDEN, _)) => {
                 Some("Agent is unavailable in manual-only mode.".into())
             }
-            Ok((StatusCode::NOT_FOUND, _)) => {
-                Some("This VMI server does not support starting Agent from the client.".into())
-            }
-            _ => Some("VMI signed in. Agent could not start with the saved settings.".into()),
+            Ok((StatusCode::NOT_FOUND, _)) => Some(
+                "This VMI server does not support connecting the Agent provider from the client."
+                    .into(),
+            ),
+            _ => Some(
+                "VMI signed in. The Agent provider could not connect with the saved settings."
+                    .into(),
+            ),
         };
     }
     // Both listeners use 127.0.0.1. Browsers scope cookies to the host
